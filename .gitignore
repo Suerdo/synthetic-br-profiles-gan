@@ -1,0 +1,66 @@
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Jupyter/Colab
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Build e empacotamento
+build/
+dist/
+*.egg-info/
+
+# Arquivos locais e temporarios
+.env
+.env.*
+*.log
+*.tmp
+*.bak
+~$*
+.tmp/
+tests/.tmp/
+
+# Sistemas operacionais
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Saidas geradas localmente
+dados_sinteticos_realistas.xlsx
+relatorio_execucao.json
+metricas_validacao.json
+notebooks/dados_sinteticos_realistas.xlsx
+notebooks/relatorio_execucao.json
+data/outputs/*
+!data/outputs/.gitkeep
+
+# Datasets grandes gerados localmente
+*.parquet
+*.feather
+*.pkl
+*.pickle
+*.csv
+*.xlsx
+!data/samples/
+!data/samples/**
+
+# Modelos, checkpoints e artefatos pesados
+checkpoints/
+models/checkpoints/
+*.h5
+*.keras
+*.ckpt
+*.weights.h5
