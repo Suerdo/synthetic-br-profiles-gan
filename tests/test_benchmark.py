@@ -622,7 +622,7 @@ class BenchmarkTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             execution = run_capacity_subprocess(
-                [sys.executable, "-c", "import time; time.sleep(2)"],
+                [sys.executable, "-c", "import time; time.sleep(30)"],
                 root / "stdout.log",
                 root / "stderr.log",
                 resource_limits={},
@@ -632,6 +632,22 @@ class BenchmarkTest(unittest.TestCase):
             self.assertTrue(execution["resource_limited"])
             self.assertTrue(execution["timed_out"])
             self.assertNotEqual(execution["exit_code"], 0)
+
+    def test_completed_capacity_subprocess_is_not_marked_as_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            execution = run_capacity_subprocess(
+                [sys.executable, "-c", "print('done')"],
+                root / "stdout.log",
+                root / "stderr.log",
+                resource_limits={},
+                timeout_seconds=5,
+                poll_interval_seconds=0.02,
+            )
+            self.assertEqual(execution["exit_code"], 0)
+            self.assertFalse(execution["resource_limited"])
+            self.assertFalse(execution["timed_out"])
+            self.assertIsNone(execution["limit_reason"])
 
     def test_capacity_missing_worker_result_becomes_failed_row(self) -> None:
         row = _capacity_row_from_worker_payload(

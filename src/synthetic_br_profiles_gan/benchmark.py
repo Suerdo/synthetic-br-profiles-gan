@@ -603,6 +603,8 @@ def run_capacity_subprocess(
                 if memory_initial is None:
                     memory_initial = memory
                 memory_peak = max(memory_peak or memory, memory)
+            if process.poll() is not None:
+                break
             elapsed = time.perf_counter() - started
             max_total = _limit_value(limits.get("max_total_seconds_per_run"))
             max_memory = _limit_value(limits.get("max_peak_memory_mb"))
@@ -619,8 +621,6 @@ def run_capacity_subprocess(
                 timed_out = True
                 limit_reason = f"subprocess_timeout_seconds={elapsed:.3f} exceeded limit {timeout_limit:.3f}"
                 _terminate_process_tree(process)
-                break
-            if process.poll() is not None:
                 break
             time.sleep(float(poll_interval_seconds))
         exit_code = process.wait()
