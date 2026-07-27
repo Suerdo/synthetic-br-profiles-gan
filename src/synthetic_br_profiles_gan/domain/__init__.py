@@ -1,4 +1,4 @@
-"""Brazilian domain tables used by generators and validators."""
+"""Tabelas de domínio brasileiras usadas por geradores e validadores."""
 
 from synthetic_br_profiles_gan.domain.brazil import (
     REGION_STATES,

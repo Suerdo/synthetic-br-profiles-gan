@@ -1,4 +1,4 @@
-"""Context object used before deriving Brazilian profile attributes."""
+"""Objeto de contexto usado antes de derivar atributos de perfis brasileiros."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class SyntheticProfileContext:
-    """Canonical profile context before identifiers and derived fields are generated."""
+    """Contexto canônico de perfil antes da geração de identificadores e campos derivados."""
 
     idade: int
     genero: str
@@ -26,7 +26,7 @@ class SyntheticProfileContext:
 
     @classmethod
     def from_mapping(cls, row: dict[str, Any] | pd.Series) -> "SyntheticProfileContext":
-        """Create a context from a pandas row or mapping with canonical column names."""
+        """Cria um contexto a partir de uma linha pandas ou mapeamento com nomes canônicos de colunas."""
         return cls(
             idade=int(row["Idade"]),
             genero=str(row["Genero"]),
@@ -42,7 +42,7 @@ class SyntheticProfileContext:
         )
 
     def to_model_row(self) -> dict[str, Any]:
-        """Return the context using canonical model column names."""
+        """Retorna o contexto usando nomes canônicos das colunas do modelo."""
         return {
             "Idade": self.idade,
             "Genero": self.genero,

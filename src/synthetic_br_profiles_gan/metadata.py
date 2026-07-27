@@ -1,4 +1,4 @@
-"""Dataset metadata and canonical schema definitions."""
+"""Metadados do dataset e definições do schema canônico."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ OCCUPATION_CATEGORIES = [
 
 @dataclass(frozen=True)
 class ColumnMetadata:
-    """Metadata for a single dataset column."""
+    """Metadados de uma única coluna do dataset."""
 
     name: str
     kind: str
@@ -96,7 +96,7 @@ class ColumnMetadata:
 
 @dataclass(frozen=True)
 class DatasetMetadata:
-    """Schema, domains, and semantic dependencies for generated profiles."""
+    """Schema, domínios e dependências semânticas dos perfis gerados."""
 
     columns: dict[str, ColumnMetadata]
     model_columns: list[str] = field(default_factory=lambda: list(MODEL_COLUMNS))
@@ -106,12 +106,12 @@ class DatasetMetadata:
     structural_dependencies: dict[str, list[str]] = field(default_factory=dict)
 
     def required_columns(self, final: bool = True) -> list[str]:
-        """Return required model or final columns."""
+        """Retorna as colunas obrigatórias do modelo ou do conjunto final."""
         columns = self.final_columns if final else self.model_columns
         return [name for name in columns if self.columns.get(name, ColumnMetadata(name, "unknown")).required]
 
     def categorical_columns(self, include_discrete_numeric: bool = True) -> list[str]:
-        """Return columns that must be treated as categorical/discrete."""
+        """Retorna as colunas que devem ser tratadas como categóricas ou discretas."""
         result = []
         for name in self.model_columns:
             column = self.columns[name]
@@ -120,7 +120,7 @@ class DatasetMetadata:
         return result
 
     def numeric_columns(self, include_discrete_numeric: bool = False) -> list[str]:
-        """Return numeric columns used for statistical comparison."""
+        """Retorna as colunas numéricas usadas na comparação estatística."""
         result = []
         for name in self.model_columns:
             column = self.columns[name]
@@ -129,7 +129,7 @@ class DatasetMetadata:
         return result
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize metadata into JSON-compatible primitives."""
+        """Serializa metadados em primitivos compatíveis com JSON."""
         return {
             "columns": {name: asdict(column) for name, column in self.columns.items()},
             "model_columns": self.model_columns,
@@ -141,7 +141,7 @@ class DatasetMetadata:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "DatasetMetadata":
-        """Build metadata from a serialized dictionary."""
+        """Cria metadados a partir de um dicionário serializado."""
         columns = {
             name: ColumnMetadata(**column_payload)
             for name, column_payload in payload.get("columns", {}).items()
@@ -158,7 +158,7 @@ class DatasetMetadata:
         )
 
     def save(self, path: str | Path) -> Path:
-        """Write metadata as JSON."""
+        """Grava metadados como JSON."""
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as file:
@@ -167,14 +167,14 @@ class DatasetMetadata:
 
     @classmethod
     def load(cls, path: str | Path) -> "DatasetMetadata":
-        """Read metadata from JSON."""
+        """Lê metadados a partir de JSON."""
         with Path(path).open(encoding="utf-8") as file:
             payload = json.load(file)
         return cls.from_dict(payload)
 
 
 def default_metadata() -> DatasetMetadata:
-    """Return the canonical metadata for this project."""
+    """Retorna os metadados canônicos deste projeto."""
     municipalities = sorted({city for cities in STATE_MUNICIPALITIES.values() for city in cities})
     states = sorted(STATE_REGION)
     ddds = list(all_ddds())
@@ -187,14 +187,14 @@ def default_metadata() -> DatasetMetadata:
             "categorical",
             categories=states,
             dependencies=["Regiao"],
-            description="State must belong to Regiao.",
+            description="Estado deve pertencer a Regiao.",
         ),
         "Municipio": ColumnMetadata(
             "Municipio",
             "categorical",
             categories=municipalities,
             dependencies=["Estado"],
-            description="Municipio must belong to Estado.",
+            description="Municipio deve pertencer a Estado.",
         ),
         "Escolaridade": ColumnMetadata("Escolaridade", "categorical", categories=EDUCATION_CATEGORIES),
         "Estado_Civil": ColumnMetadata("Estado_Civil", "categorical", categories=MARITAL_STATUS_CATEGORIES),
@@ -220,7 +220,7 @@ def default_metadata() -> DatasetMetadata:
             "Data_Nascimento",
             "date",
             dependencies=["Idade"],
-            description="Birth date must produce Idade on the configured reference date.",
+            description="Data de nascimento deve produzir Idade na data de referência configurada.",
         ),
         "CPF": ColumnMetadata("CPF", "identifier"),
         "CNH": ColumnMetadata("CNH", "identifier"),

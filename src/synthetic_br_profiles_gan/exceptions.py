@@ -1,31 +1,31 @@
-"""Domain-specific exceptions for the synthetic profile pipeline."""
+"""Exceções específicas de domínio para o pipeline de perfis sintéticos."""
 
 from __future__ import annotations
 
 
 class PipelineError(Exception):
-    """Base class for expected pipeline failures."""
+    """Classe-base para falhas esperadas do pipeline."""
 
 
 class ConfigurationError(PipelineError):
-    """Raised when a configuration file is missing required settings."""
+    """Gerada quando um arquivo de configuração não contém definições obrigatórias."""
 
 
 class ModelBackendUnavailable(PipelineError):
-    """Raised when an optional model backend is not installed."""
+    """Gerada quando um backend opcional de modelo não está instalado."""
 
 
 class SyntheticModelError(PipelineError):
-    """Raised when a synthesizer cannot be trained, loaded, or sampled."""
+    """Gerada quando um sintetizador não pode ser treinado, carregado ou amostrado."""
 
 
 class ModelSerializationError(SyntheticModelError):
-    """Raised when a saved synthesizer artifact is missing or corrupted."""
+    """Gerada quando um artefato salvo do sintetizador está ausente ou corrompido."""
 
 
 class StructuralValidationError(PipelineError):
-    """Raised when generated data fails a required structural validation."""
+    """Gerada quando os dados gerados falham em uma validação estrutural obrigatória."""
 
 
 class QualityGateError(PipelineError):
-    """Raised when an approval-required command fails quality gates."""
+    """Gerada quando um comando que exige aprovação falha nos quality gates."""

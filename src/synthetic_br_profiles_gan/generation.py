@@ -1,4 +1,4 @@
-"""Candidate selection and generation accounting utilities."""
+"""Utilitários de seleção de candidatos e contabilização da geração."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class CandidateSelectionResult:
-    """Selected candidates plus accounting metrics."""
+    """Candidatos selecionados e métricas de contabilização."""
 
     selected: pd.DataFrame
     accounting: dict[str, Any]
@@ -23,7 +23,7 @@ def select_valid_candidates(
     rejection_reasons: dict[str, int] | None = None,
     attempts: int = 1,
 ) -> CandidateSelectionResult:
-    """Select up to ``n_target`` valid rows while accounting for surplus valid rows."""
+    """Seleciona até ``n_target`` linhas válidas e contabiliza excedentes válidos."""
     mask = valid_mask.reindex(candidates.index).fillna(False).astype(bool)
     accepted = candidates.loc[mask].reset_index(drop=True)
     selected = accepted.iloc[:n_target].copy()

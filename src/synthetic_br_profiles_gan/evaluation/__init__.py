@@ -1,4 +1,4 @@
-"""Model-independent evaluation and quality gate utilities."""
+"""Utilitários de avaliação e quality gates independentes de modelo."""
 
 from synthetic_br_profiles_gan.evaluation.metrics import evaluate_synthetic_data
 from synthetic_br_profiles_gan.evaluation.privacy import privacy_metrics

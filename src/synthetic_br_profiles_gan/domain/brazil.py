@@ -1,8 +1,8 @@
-"""Small, explicit Brazilian geography and DDD reference tables.
+"""Pequenas tabelas explícitas de referência geográfica brasileira e DDD.
 
-The tables are intentionally local and static. They are not official registry
-queries and must not be treated as proof that generated records correspond to
-real people, phones, addresses, or documents.
+As tabelas são intencionalmente locais e estáticas. Elas não são consultas a
+cadastros oficiais e não devem ser tratadas como prova de que registros gerados
+correspondem a pessoas, telefones, endereços ou documentos reais.
 """
 
 from __future__ import annotations
@@ -106,25 +106,25 @@ STATE_DDDS: dict[str, tuple[int, ...]] = {
 
 
 def states_for_region(region: str) -> tuple[str, ...]:
-    """Return the known states for a region."""
+    """Retorna os estados conhecidos de uma região."""
     return REGION_STATES.get(str(region), ())
 
 
 def region_for_state(state: str) -> str | None:
-    """Return the region associated with a state abbreviation."""
+    """Retorna a região associada à sigla de um estado."""
     return STATE_REGION.get(str(state))
 
 
 def municipalities_for_state(state: str) -> tuple[str, ...]:
-    """Return the configured municipalities for a state."""
+    """Retorna os municípios configurados para um estado."""
     return STATE_MUNICIPALITIES.get(str(state), ())
 
 
 def ddds_for_state(state: str) -> tuple[int, ...]:
-    """Return DDD codes compatible with a state."""
+    """Retorna códigos DDD compatíveis com um estado."""
     return STATE_DDDS.get(str(state), ())
 
 
 def all_ddds() -> tuple[int, ...]:
-    """Return all known DDD codes in the local reference table."""
+    """Retorna todos os códigos DDD conhecidos na tabela local de referência."""
     return tuple(sorted({ddd for ddds in STATE_DDDS.values() for ddd in ddds}))

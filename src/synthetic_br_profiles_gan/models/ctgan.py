@@ -1,4 +1,4 @@
-"""CTGAN synthesizer wrapper using the standalone ctgan package."""
+"""Wrapper do sintetizador CTGAN usando o pacote standalone ctgan."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ DEFAULT_CTGAN_CONFIG: ConfigDict = {
 
 
 class CTGANSynthesizer:
-    """Real CTGAN implementation backed by the standalone ``ctgan`` package."""
+    """Implementação real de CTGAN baseada no pacote standalone ``ctgan``."""
 
     model_name = "ctgan"
 
@@ -51,7 +51,7 @@ class CTGANSynthesizer:
         return CTGAN
 
     def fit(self, data: pd.DataFrame, metadata: DatasetMetadata) -> None:
-        """Fit CTGAN, declaring categorical/discrete columns explicitly."""
+        """Ajusta a CTGAN declarando explicitamente colunas categóricas e discretas."""
         set_global_seed(int(self.config.get("seed", 41)), seed_tensorflow=False, seed_torch=True)
         CTGAN = self._ctgan_class()
         self.metadata = metadata
@@ -68,7 +68,7 @@ class CTGANSynthesizer:
         self.model.fit(train, self.discrete_columns)
 
     def sample(self, num_rows: int) -> pd.DataFrame:
-        """Sample canonical model rows and restore configured dtypes."""
+        """Amostra linhas canônicas do modelo e restaura os dtypes configurados."""
         if self.model is None:
             raise SyntheticModelError("CTGANSynthesizer must be fitted or loaded before sampling.")
         sampled = self.model.sample(int(num_rows))
@@ -76,7 +76,7 @@ class CTGANSynthesizer:
         return coerce_model_dtypes(sampled, self.metadata)
 
     def save(self, output_path: Path) -> None:
-        """Save CTGAN model, metadata, and fit configuration."""
+        """Salva o modelo CTGAN, os metadados e a configuração de ajuste."""
         if self.model is None:
             raise SyntheticModelError("Cannot save an unfitted CTGANSynthesizer.")
         output_path.mkdir(parents=True, exist_ok=True)
@@ -94,7 +94,7 @@ class CTGANSynthesizer:
 
     @classmethod
     def load(cls, input_path: Path) -> "CTGANSynthesizer":
-        """Load a saved CTGAN synthesizer."""
+        """Carrega um sintetizador CTGAN salvo."""
         cls._ctgan_class()
         try:
             with (input_path / "metadata_ctgan.json").open(encoding="utf-8") as file:

@@ -1,4 +1,4 @@
-"""Synthetic Brazilian profile generation and evaluation pipeline."""
+"""Pipeline de geração e avaliação de perfis sintéticos brasileiros."""
 
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 from synthetic_br_profiles_gan.pipeline import run_pipeline

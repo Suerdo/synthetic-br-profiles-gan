@@ -1,4 +1,4 @@
-"""Common synthesizer protocol and factory."""
+"""Protocolo comum dos sintetizadores e fábrica de modelos."""
 
 from __future__ import annotations
 
@@ -12,26 +12,26 @@ from synthetic_br_profiles_gan.metadata import DatasetMetadata
 
 
 class TabularSynthesizer(Protocol):
-    """Common interface for all tabular synthesizers."""
+    """Interface comum para todos os sintetizadores tabulares."""
 
     model_name: str
 
     def fit(self, data: pd.DataFrame, metadata: DatasetMetadata) -> None:
-        """Fit the synthesizer to training data only."""
+        """Ajusta o sintetizador usando somente os dados de treinamento."""
 
     def sample(self, num_rows: int) -> pd.DataFrame:
-        """Sample synthetic model rows."""
+        """Amostra linhas sintéticas no schema do modelo."""
 
     def save(self, output_path: Path) -> None:
-        """Save the synthesizer state."""
+        """Salva o estado do sintetizador."""
 
     @classmethod
     def load(cls, input_path: Path) -> Self:
-        """Load a synthesizer state."""
+        """Carrega o estado de um sintetizador."""
 
 
 def create_synthesizer(model_name: str, config: ConfigDict | None = None) -> TabularSynthesizer:
-    """Create a synthesizer implementation by name."""
+    """Cria uma implementação de sintetizador pelo nome."""
     normalized = model_name.lower().replace("-", "_")
     if normalized in {"programmatic", "programmatic_synthesizer"}:
         from synthetic_br_profiles_gan.models.programmatic import ProgrammaticSynthesizer

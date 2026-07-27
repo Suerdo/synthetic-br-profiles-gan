@@ -1,4 +1,4 @@
-"""Utilitarios do projeto."""
+"""Utilitários do projeto."""
 
 from synthetic_br_profiles_gan.utils.reproducibility import set_global_seed
 

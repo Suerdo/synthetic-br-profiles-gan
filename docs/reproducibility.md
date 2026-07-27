@@ -1,18 +1,18 @@
 # Reprodutibilidade
 
-A seed e centralizada no pipeline e propagada para:
+A seed é centralizada no pipeline e propagada para:
 
 - `random`;
 - NumPy;
-- TensorFlow, quando `simple_gan` e usado;
-- PyTorch/CTGAN, quando `ctgan` e usado;
+- TensorFlow, quando `simple_gan` é usado;
+- PyTorch/CTGAN, quando `ctgan` é usado;
 - Faker;
 - split treino/holdout;
-- baseline programatico.
+- baseline programático.
 
-`PYTHONHASHSEED` e registrado no manifesto. Quando ele e alterado depois que o interpretador Python ja iniciou, o manifesto inclui a limitacao.
+`PYTHONHASHSEED` é registrado no manifesto. Quando ele é alterado depois que o interpretador Python já iniciou, o manifesto inclui a limitação.
 
-Datas de nascimento dependem de `reference_date`. Para reproduzir exatamente uma execucao, mantenha a mesma configuracao:
+Datas de nascimento dependem de `reference_date`. Para reproduzir exatamente uma execução, mantenha a mesma configuração:
 
 ```bash
 python -m synthetic_br_profiles_gan pipeline \
@@ -20,4 +20,4 @@ python -m synthetic_br_profiles_gan pipeline \
   --config configs/pipeline.yaml
 ```
 
-Treinos neurais podem variar por CPU/GPU, drivers, versoes de bibliotecas e operacoes nao deterministicas do backend. Por isso, testes padrao usam datasets pequenos e nao exigem igualdade bit a bit para TensorFlow ou CTGAN.
+Treinos neurais podem variar por CPU/GPU, drivers, versões de bibliotecas e operações não determinísticas do backend. Por isso, testes padrão usam datasets pequenos e não exigem igualdade bit a bit para TensorFlow ou CTGAN.

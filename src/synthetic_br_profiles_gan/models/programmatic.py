@@ -1,4 +1,4 @@
-"""Purely programmatic baseline synthesizer."""
+"""Sintetizador de baseline puramente programático."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 
 
 class ProgrammaticSynthesizer:
-    """Generate canonical model rows using the explicit calibration rules."""
+    """Gera linhas canônicas de modelo usando as regras explícitas de calibração."""
 
     model_name = "programmatic"
 
@@ -24,18 +24,18 @@ class ProgrammaticSynthesizer:
         self._sample_calls = 0
 
     def fit(self, data: pd.DataFrame, metadata: DatasetMetadata) -> None:
-        """Store metadata; no training is required for the programmatic baseline."""
+        """Armazena metadados; o baseline programático não exige treinamento."""
         self.metadata = metadata
 
     def sample(self, num_rows: int) -> pd.DataFrame:
-        """Sample rows from the same controlled rules used for calibration."""
+        """Amostra linhas com as mesmas regras controladas usadas na calibração."""
         base_seed = int(self.config.get("seed", 41))
         seed = base_seed + self._sample_calls
         self._sample_calls += 1
         return generate_calibration_dataset(num_rows=num_rows, seed=seed, config=self.config)
 
     def save(self, output_path: Path) -> None:
-        """Save programmatic configuration and metadata."""
+        """Salva a configuração programática e os metadados."""
         output_path.mkdir(parents=True, exist_ok=True)
         with (output_path / "config.json").open("w", encoding="utf-8") as file:
             json.dump(self.config, file, ensure_ascii=False, indent=2)
@@ -43,7 +43,7 @@ class ProgrammaticSynthesizer:
 
     @classmethod
     def load(cls, input_path: Path) -> "ProgrammaticSynthesizer":
-        """Load a saved programmatic baseline."""
+        """Carrega um baseline programático salvo."""
         try:
             with (input_path / "config.json").open(encoding="utf-8") as file:
                 config = json.load(file)

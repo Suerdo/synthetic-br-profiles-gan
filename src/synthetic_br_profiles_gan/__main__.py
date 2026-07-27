@@ -1,4 +1,4 @@
-"""Module entry point for ``python -m synthetic_br_profiles_gan``."""
+"""Ponto de entrada do módulo para ``python -m synthetic_br_profiles_gan``."""
 
 from __future__ import annotations
 

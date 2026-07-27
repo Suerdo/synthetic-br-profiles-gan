@@ -1,4 +1,4 @@
-"""Reproducibility utilities."""
+"""Utilitários de reprodutibilidade."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SeedState:
-    """Information about seed configuration for a run."""
+    """Informações sobre a configuração de seed de uma execução."""
 
     seed: int
     pythonhashseed: str | None
@@ -31,7 +31,7 @@ def set_global_seed(
     seed_tensorflow: bool = True,
     seed_torch: bool = True,
 ) -> SeedState:
-    """Fix seeds for Python, NumPy, TensorFlow, and PyTorch when available."""
+    """Fixa seeds para Python, NumPy, TensorFlow e PyTorch quando disponíveis."""
     notes: list[str] = []
     previous_hash_seed = os.environ.get("PYTHONHASHSEED")
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -86,7 +86,7 @@ def set_global_seed(
 
 
 def seed_state_to_dict(state: SeedState) -> dict[str, Any]:
-    """Serialize seed state for manifests."""
+    """Serializa o estado de seed para manifestos."""
     return {
         "seed": state.seed,
         "pythonhashseed": state.pythonhashseed,

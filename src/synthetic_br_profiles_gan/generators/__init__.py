@@ -1,4 +1,4 @@
-"""Geradores de atributos sinteticos brasileiros."""
+"""Geradores de atributos sintéticos brasileiros."""
 
 from synthetic_br_profiles_gan.generators.demographics import (
     calcular_idade,

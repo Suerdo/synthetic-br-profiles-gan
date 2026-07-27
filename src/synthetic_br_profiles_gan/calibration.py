@@ -1,4 +1,4 @@
-"""Controlled calibration data with documented semantic dependencies."""
+"""Dados de calibração controlados com dependências semânticas documentadas."""
 
 from __future__ import annotations
 
@@ -180,7 +180,7 @@ def generate_calibration_dataset(
     seed: int | None = None,
     config: ConfigDict | None = None,
 ) -> pd.DataFrame:
-    """Generate a synthetic calibration dataset with semantic dependencies."""
+    """Gera uma base de calibração sintética com dependências semânticas."""
     effective = deep_merge(DEFAULT_CALIBRATION_CONFIG, config or {})
     if num_rows is None:
         num_rows = int(effective["num_rows"])
@@ -230,7 +230,7 @@ def generate_calibration_dataset(
 
 
 def coerce_model_dtypes(df: pd.DataFrame, metadata: DatasetMetadata | None = None) -> pd.DataFrame:
-    """Coerce canonical model columns to stable pandas dtypes."""
+    """Converte colunas canônicas do modelo para dtypes estáveis do pandas."""
     coerced = df.copy()
     metadata = metadata or default_metadata()
     for column in metadata.model_columns:
@@ -253,11 +253,11 @@ def split_train_holdout(
     train_rows: int | None = None,
     holdout_rows: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split calibration data into train and holdout without leakage.
+    """Divide dados de calibração em treino e holdout sem vazamento.
 
-    When ``train_rows`` and ``holdout_rows`` are provided, the split uses those
-    exact sizes after deterministic shuffling. The fraction-based behavior is
-    preserved for existing callers.
+    Quando ``train_rows`` e ``holdout_rows`` são fornecidos, a divisão usa esses
+    tamanhos exatos após embaralhamento determinístico. O comportamento baseado
+    em fração é preservado para chamadas existentes.
     """
     if not 0 < holdout_fraction < 1:
         raise ValueError("holdout_fraction must be between 0 and 1.")
@@ -291,7 +291,7 @@ def save_calibration_splits(
     output_dir: str | Path,
     metadata: DatasetMetadata | None = None,
 ) -> dict[str, Path]:
-    """Persist calibration, train, holdout, and metadata artifacts."""
+    """Persiste artefatos de calibração, treino, holdout e metadados."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     paths = {

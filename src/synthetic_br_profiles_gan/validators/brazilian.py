@@ -1,4 +1,4 @@
-"""Validacoes estruturais para documentos e campos sinteticos brasileiros."""
+"""Validações estruturais para documentos e campos sintéticos brasileiros."""
 
 from __future__ import annotations
 
@@ -15,17 +15,17 @@ TITULO_ELEITOR_FORMAT_RE = re.compile(r"^\d{4} \d{4} \d{2} \d{2}$")
 
 
 def somente_digitos(valor: object) -> str:
-    """Remove caracteres nao numericos de um valor."""
+    """Remove caracteres não numéricos de um valor."""
     return re.sub(r"\D", "", str(valor))
 
 
 def validar_formato_cpf(valor: object) -> bool:
-    """Valida apenas a mascara 000.000.000-00."""
+    """Valida apenas a máscara 000.000.000-00."""
     return bool(CPF_FORMAT_RE.match(str(valor)))
 
 
 def validar_cpf(valor: object) -> bool:
-    """Valida formato, tamanho e digitos verificadores do CPF."""
+    """Valida formato, tamanho e dígitos verificadores do CPF."""
     cpf = somente_digitos(valor)
     if len(cpf) != 11 or cpf == cpf[0] * 11:
         return False
@@ -75,7 +75,7 @@ def validar_cnh(valor: object) -> bool:
 
 
 def validar_titulo_eleitor(valor: object) -> bool:
-    """Valida o titulo de eleitor conforme a regra local usada pelo gerador."""
+    """Valida o título de eleitor conforme a regra local usada pelo gerador."""
     text = str(valor)
     if not TITULO_ELEITOR_FORMAT_RE.match(text):
         return False
@@ -106,7 +106,7 @@ def _contar_invalidos(df: pd.DataFrame, coluna: str, validator) -> int:
 
 
 def avaliar_regras_final(df: pd.DataFrame) -> dict:
-    """Avalia formato, digitos de CPF e duplicidades do dataset final."""
+    """Avalia formato, dígitos de CPF e duplicidades do dataset final."""
     n = len(df)
     contagens = {
         "cpf_formato_invalido": _contar_invalidos(df, "CPF", validar_formato_cpf),
@@ -146,7 +146,7 @@ def avaliar_regras_final(df: pd.DataFrame) -> dict:
 
 
 def avaliar_regras_bruto(df: pd.DataFrame) -> dict:
-    """Avalia regras numericas simples antes do pos-processamento final."""
+    """Avalia regras numéricas simples antes do pós-processamento final."""
     n = len(df)
     violacoes = {}
 

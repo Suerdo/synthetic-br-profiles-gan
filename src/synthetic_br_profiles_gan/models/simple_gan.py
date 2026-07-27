@@ -1,7 +1,7 @@
-"""Adapter that exposes the dense Keras GAN through the synthesizer protocol.
+"""Adaptador que expõe a GAN densa em Keras pelo protocolo de sintetizadores.
 
-The implementation details live in ``models.gan``; this module owns the common
-fit/sample/save/load contract used by the pipeline.
+Os detalhes de implementação ficam em ``models.gan``; este módulo concentra o
+contrato comum fit/sample/save/load usado pelo pipeline.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ DEFAULT_SIMPLE_GAN_CONFIG: ConfigDict = {
 
 
 class SimpleTabularGAN:
-    """Dense tabular GAN baseline preserved from the original implementation."""
+    """Baseline de GAN tabular densa preservado da implementação original."""
 
     model_name = "simple_gan"
 
@@ -54,7 +54,7 @@ class SimpleTabularGAN:
         self._sample_calls = 0
 
     def fit(self, data: pd.DataFrame, metadata: DatasetMetadata) -> None:
-        """Fit the dense GAN using only the training split."""
+        """Ajusta a GAN densa usando somente o split de treinamento."""
         _, _, Adam = _require_tensorflow()
         self.metadata = metadata
         self.preprocessor = DataPreprocessor(metadata=metadata)
@@ -99,7 +99,7 @@ class SimpleTabularGAN:
         self.training_history["config"] = self.config
 
     def sample(self, num_rows: int) -> pd.DataFrame:
-        """Sample canonical model rows without discriminator-threshold filtering."""
+        """Amostra linhas canônicas do modelo sem filtro por limiar do discriminador."""
         if self.generator is None or self.preprocessor is None:
             raise SyntheticModelError("SimpleTabularGAN must be fitted or loaded before sampling.")
         rng = np.random.default_rng(int(self.config.get("seed", 41)) + self._sample_calls)
@@ -111,7 +111,7 @@ class SimpleTabularGAN:
         return sampled[self.metadata.model_columns]
 
     def save(self, output_path: Path) -> None:
-        """Save Keras models, preprocessor, metadata, config, and training history."""
+        """Salva modelos Keras, pré-processador, metadados, configuração e histórico de treino."""
         if self.generator is None or self.discriminator is None or self.preprocessor is None:
             raise SyntheticModelError("Cannot save an unfitted SimpleTabularGAN.")
         output_path.mkdir(parents=True, exist_ok=True)
@@ -126,7 +126,7 @@ class SimpleTabularGAN:
 
     @classmethod
     def load(cls, input_path: Path) -> "SimpleTabularGAN":
-        """Load a saved SimpleTabularGAN."""
+        """Carrega uma SimpleTabularGAN salva."""
         _, _, _ = _require_tensorflow()
         from tensorflow.keras.models import load_model
 

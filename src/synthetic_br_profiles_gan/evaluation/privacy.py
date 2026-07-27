@@ -1,4 +1,4 @@
-"""Diversity and privacy-risk indicators for synthetic data."""
+"""Indicadores de diversidade e risco de privacidade para dados sintéticos."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 
 
 def duplicate_row_rate(df: pd.DataFrame) -> float:
-    """Return the rate of duplicated rows."""
+    """Retorna a taxa de linhas duplicadas."""
     if len(df) == 0:
         return 0.0
     return float(df.duplicated().sum() / len(df))
 
 
 def exact_match_rate(synthetic: pd.DataFrame, reference: pd.DataFrame, columns: list[str]) -> float:
-    """Return exact row match rate against reference over selected columns."""
+    """Retorna a taxa de match exato com a referência nas colunas selecionadas."""
     usable_columns = [column for column in columns if column in synthetic.columns and column in reference.columns]
     if len(synthetic) == 0 or not usable_columns:
         return 0.0
@@ -69,7 +69,7 @@ def nearest_neighbor_metrics(
     metadata: DatasetMetadata,
     max_rows: int = 1000,
 ) -> dict[str, Any]:
-    """Compute DCR and NNDR over model attributes, excluding identifiers."""
+    """Calcula DCR e NNDR sobre atributos de modelo, excluindo identificadores."""
     if len(synthetic) == 0 or len(reference) == 0:
         return {"distance_to_closest_record": None, "nearest_neighbor_distance_ratio": None}
     synthetic_sample = synthetic.head(max_rows).copy()
@@ -103,7 +103,7 @@ def nearest_neighbor_metrics(
 
 
 def category_coverage(synthetic: pd.DataFrame, reference: pd.DataFrame, metadata: DatasetMetadata) -> dict[str, float]:
-    """Return category coverage per categorical column."""
+    """Retorna a cobertura de categorias por coluna categórica."""
     coverage: dict[str, float] = {}
     for column in metadata.categorical_columns(include_discrete_numeric=True):
         if column not in synthetic.columns or column not in reference.columns:
@@ -121,9 +121,9 @@ def privacy_metrics(
     metadata: DatasetMetadata | None = None,
     max_nearest_neighbor_rows: int = 1000,
 ) -> dict[str, Any]:
-    """Compute diversity and memorization-risk indicators.
+    """Calcula indicadores de diversidade e risco de memorização.
 
-    These metrics are indicators only. They do not prove anonymization.
+    Essas métricas são apenas indicadores. Elas não provam anonimização.
     """
     metadata = metadata or default_metadata()
     columns = [

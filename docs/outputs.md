@@ -1,6 +1,6 @@
-# Saidas Geradas
+# Saídas geradas
 
-As execucoes sao versionadas por `run_id` em `artifacts/runs/<run_id>/`.
+As execuções são versionadas por `run_id` em `artifacts/runs/<run_id>/`.
 
 ```text
 artifacts/
@@ -16,17 +16,17 @@ artifacts/
       config.yaml
 ```
 
-O dataset aprovado fica em `approved/`. Resultados reprovados ou em observacao ficam em `quarantine/`.
+O dataset aprovado fica em `approved/`. Resultados reprovados ou em observação ficam em `quarantine/`.
 
 Arquivos principais:
 
 - `dataset.parquet`: formato principal de processamento.
-- `dataset.xlsx`: exportacao opcional para usuarios.
-- `validation.json`: validacao estrutural.
-- `evaluation.json`: metricas contra treino e holdout.
+- `dataset.xlsx`: exportação opcional para usuários.
+- `validation.json`: validação estrutural.
+- `evaluation.json`: métricas contra treino e holdout.
 - `quality_gates.json`: status e falhas dos gates.
-- `generation.json`: contabilidade de candidatos, aceitos, rejeitados e excedentes validos.
-- `manifest.json`: ambiente, hashes, modelo, seed, status e commit Git quando disponivel.
-- `train.parquet` e `holdout.parquet`: splits usados para avaliacao.
+- `generation.json`: contabilidade de candidatos, aceitos, rejeitados e excedentes válidos.
+- `manifest.json`: ambiente, hashes, modelo, seed, status e commit Git quando disponível.
+- `train.parquet` e `holdout.parquet`: splits usados para avaliação.
 
 Arquivos de nomes fixos em `data/outputs/` permanecem apenas para compatibilidade do script legado.

@@ -1,4 +1,4 @@
-"""Benchmark orchestration for comparing tabular synthesizers."""
+"""Orquestração de benchmarks para comparar sintetizadores tabulares."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ResourceLimitExceeded(PipelineError):
-    """Raised when a configured benchmark resource limit is exceeded."""
+    """Gerada quando um limite de recurso configurado para benchmark é excedido."""
 
 DEFAULT_BENCHMARK_CONFIG: ConfigDict = {
     "benchmark": {
@@ -239,13 +239,13 @@ CAPACITY_COMPLETED_STATUSES = {"completed", "quality_quarantined", "quality_reje
 
 
 def build_benchmark_id(name: str, timestamp: datetime | None = None) -> str:
-    """Build a stable benchmark id prefix plus a timestamp/short suffix."""
+    """Cria um benchmark id com prefixo estável, timestamp e sufixo curto."""
     slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", name.strip().lower()).strip("-") or "benchmark"
     return f"{slug}-{build_run_id(timestamp)}"
 
 
 def resolve_benchmark_config(config: ConfigDict | None = None) -> ConfigDict:
-    """Merge benchmark defaults and validate the resolved configuration."""
+    """Mescla padrões do benchmark e valida a configuração resolvida."""
     effective = deep_merge(DEFAULT_BENCHMARK_CONFIG, config or {})
     if config and isinstance(config.get("benchmark"), dict) and "train_sizes" in config["benchmark"] and "calibration_rows" not in config["benchmark"]:
         effective["benchmark"].pop("calibration_rows", None)
@@ -258,7 +258,7 @@ def resolve_benchmark_config(config: ConfigDict | None = None) -> ConfigDict:
 
 
 def benchmark_matrix(config: ConfigDict) -> list[dict[str, Any]]:
-    """Return the configured model x seed x optional train-size matrix."""
+    """Retorna a matriz configurada de modelo x seed x train_size opcional."""
     benchmark = config["benchmark"]
     rows: list[dict[str, Any]] = []
     if "train_sizes" in benchmark:
@@ -283,7 +283,7 @@ def benchmark_matrix(config: ConfigDict) -> list[dict[str, Any]]:
 
 
 def holdout_rows_for_train_size(train_size: int, holdout_fraction: float) -> int:
-    """Return the exact holdout size implied by a target training size."""
+    """Retorna o tamanho exato de holdout implícito por um tamanho-alvo de treino."""
     value = int(train_size) * float(holdout_fraction) / (1.0 - float(holdout_fraction))
     rounded = int(round(value))
     if not math.isclose(value, rounded, rel_tol=0.0, abs_tol=1e-9):
@@ -292,7 +292,7 @@ def holdout_rows_for_train_size(train_size: int, holdout_fraction: float) -> int
 
 
 def train_size_specs(config: ConfigDict) -> list[dict[str, int | None]]:
-    """Return the configured train-size specifications."""
+    """Retorna as especificações configuradas de train_size."""
     benchmark = config["benchmark"]
     if "train_sizes" not in benchmark:
         return [{"train_size": None, "holdout_size": None, "calibration_rows": int(benchmark["calibration_rows"])}]
@@ -307,7 +307,7 @@ def train_size_specs(config: ConfigDict) -> list[dict[str, int | None]]:
 
 
 def rotate_models_for_seed(models: list[str], seed_index: int, rotate: bool) -> list[str]:
-    """Rotate model execution order by seed to reduce cache/warm-up bias."""
+    """Alterna a ordem de execução dos modelos por seed para reduzir viés de cache e warm-up."""
     if not rotate or not models:
         return list(models)
     offset = seed_index % len(models)
@@ -315,7 +315,7 @@ def rotate_models_for_seed(models: list[str], seed_index: int, rotate: bool) -> 
 
 
 class ResourceMonitor:
-    """Sample resident process memory during one benchmark run."""
+    """Amostra memória residente do processo durante uma execução de benchmark."""
 
     def __init__(self, interval_seconds: float = 0.1) -> None:
         self.interval_seconds = float(interval_seconds)
@@ -349,13 +349,13 @@ class ResourceMonitor:
             self.peak_memory_mb = max(last, self.peak_memory_mb or last)
 
     def current_memory_mb(self) -> float | None:
-        """Return current resident memory in MiB when psutil is available."""
+        """Retorna a memória residente atual em MiB quando psutil está disponível."""
         if self._process is None:
             return None
         return float(self._process.memory_info().rss / (1024 * 1024))
 
     def thread_count(self) -> int | None:
-        """Return current process thread count when psutil is available."""
+        """Retorna a quantidade atual de threads do processo quando psutil está disponível."""
         if self._process is None:
             return None
         return int(self._process.num_threads())
@@ -372,7 +372,7 @@ def run_capacity_benchmark(
     started_at: datetime | None = None,
     started_perf: float | None = None,
 ) -> dict[str, Any]:
-    """Run an operational capacity benchmark with isolated model subprocesses."""
+    """Executa um benchmark de capacidade operacional com subprocessos isolados por modelo."""
     started = started_at or datetime.now(timezone.utc)
     perf_start = started_perf or time.perf_counter()
     benchmark_id = build_benchmark_id(str(config["benchmark"]["name"]), started)
@@ -587,7 +587,7 @@ def run_capacity_subprocess(
     timeout_seconds: float | int | None = None,
     poll_interval_seconds: float = 0.2,
 ) -> dict[str, Any]:
-    """Run a capacity worker and monitor resident memory of its process tree."""
+    """Executa um worker de capacidade e monitora a memória residente da árvore de processos."""
     limits = resource_limits or {}
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
@@ -885,7 +885,7 @@ def _capacity_run_reference(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def calculate_capacity_limits(rows: list[dict[str, Any]], models: list[str], train_sizes: list[int]) -> list[dict[str, Any]]:
-    """Calculate observed capacity limits by model without claiming absolute limits."""
+    """Calcula limites de capacidade observados por modelo sem afirmar limites absolutos."""
     sorted_sizes = sorted(int(size) for size in train_sizes)
     payload: list[dict[str, Any]] = []
     for model in models:
@@ -992,7 +992,7 @@ def _write_capacity_outputs(
 
 
 def run_benchmark(config: ConfigDict | None = None) -> dict[str, Any]:
-    """Run the benchmark and write benchmark-level artifacts."""
+    """Executa o benchmark e grava artefatos no nível do benchmark."""
     started = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     effective = resolve_benchmark_config(config)
@@ -1232,7 +1232,7 @@ def aggregate_summary_by_model(
     failures: list[dict[str, Any]],
     models: list[str],
 ) -> dict[str, Any]:
-    """Aggregate main benchmark metrics by model."""
+    """Agrega métricas principais do benchmark por modelo."""
     frame = pd.DataFrame(summary_rows)
     aggregates: dict[str, Any] = {}
     for model in models:
@@ -1274,7 +1274,7 @@ def aggregate_summary_by_model_and_size(
     failures: list[dict[str, Any]],
     models: list[str],
 ) -> dict[str, Any]:
-    """Aggregate main benchmark metrics by model and train size."""
+    """Agrega métricas principais do benchmark por modelo e tamanho de treino."""
     frame = pd.DataFrame(summary_rows)
     train_sizes = sorted(
         int(size)
@@ -1317,7 +1317,7 @@ def aggregate_summary_by_model_and_size(
 
 
 def calculate_marginal_gains(summary_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Calculate exploratory marginal changes between configured train sizes."""
+    """Calcula mudanças marginais exploratórias entre tamanhos de treino configurados."""
     frame = pd.DataFrame(summary_rows)
     if frame.empty or "train_size" not in frame:
         return []
@@ -1372,7 +1372,7 @@ def calculate_scalability_limits(
     models: list[str],
     train_sizes: list[int],
 ) -> list[dict[str, Any]]:
-    """Summarize observed successful train sizes per model for this environment."""
+    """Resume tamanhos de treino concluídos com sucesso por modelo neste ambiente."""
     if not train_sizes:
         return []
     frame = pd.DataFrame(summary_rows)
@@ -1467,7 +1467,7 @@ def _preflight_models(models: list[str]) -> list[dict[str, str]]:
 
 
 def _warmup_backends(models: list[str]) -> dict[str, float]:
-    """Load optional model backends once and record warm-up time separately."""
+    """Carrega backends opcionais de modelo uma vez e registra o warm-up separadamente."""
     timings: dict[str, float] = {}
     for model in models:
         started = time.perf_counter()
@@ -1622,7 +1622,7 @@ def summarize_run(
     calibration_rows: int | None = None,
     backend_warmup_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Return one semilong summary row for a completed run."""
+    """Retorna uma linha de resumo semilonga para uma execução concluída."""
     evaluation = result["evaluation"]
     validation = result["validation"]
     manifest = result["manifest"]
@@ -1698,7 +1698,7 @@ def flatten_run_metrics(
     train_size: int | None = None,
     holdout_size: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Flatten existing evaluation, validation, and gate outputs into long rows."""
+    """Achata saídas existentes de avaliação, validação e gates em linhas longas."""
     rows: list[dict[str, Any]] = []
     evaluation = result["evaluation"]
     validation = result["validation"]

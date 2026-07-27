@@ -1,4 +1,4 @@
-"""Configuration loading and validation helpers."""
+"""Auxiliares de carregamento e validação de configuração."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ConfigDict = dict[str, Any]
 
 
 def deep_merge(base: ConfigDict, override: ConfigDict) -> ConfigDict:
-    """Return a recursive merge of two configuration dictionaries."""
+    """Retorna a mescla recursiva de dois dicionários de configuração."""
     merged = deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -28,7 +28,7 @@ def deep_merge(base: ConfigDict, override: ConfigDict) -> ConfigDict:
 
 
 def load_yaml_config(path: str | Path) -> ConfigDict:
-    """Load a YAML configuration file."""
+    """Carrega um arquivo de configuração YAML."""
     config_path = Path(path)
     if not config_path.exists():
         raise ConfigurationError(f"Configuration file not found: {config_path}")
@@ -40,7 +40,7 @@ def load_yaml_config(path: str | Path) -> ConfigDict:
 
 
 def save_yaml_config(config: ConfigDict, path: str | Path) -> Path:
-    """Persist a configuration dictionary as YAML."""
+    """Persiste um dicionário de configuração como YAML."""
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as file:
@@ -49,7 +49,7 @@ def save_yaml_config(config: ConfigDict, path: str | Path) -> Path:
 
 
 def require_keys(config: ConfigDict, keys: list[str], context: str) -> None:
-    """Validate that all required keys exist in a dictionary."""
+    """Valida se todas as chaves obrigatórias existem em um dicionário."""
     missing = [key for key in keys if key not in config]
     if missing:
         joined = ", ".join(missing)
@@ -57,13 +57,13 @@ def require_keys(config: ConfigDict, keys: list[str], context: str) -> None:
 
 
 def config_hash(config: ConfigDict) -> str:
-    """Return a stable SHA256 hash for a configuration dictionary."""
+    """Retorna um hash SHA256 estável para um dicionário de configuração."""
     payload = json.dumps(config, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
 def resolve_path(path: str | Path, base_dir: str | Path | None = None) -> Path:
-    """Resolve a path relative to an optional base directory."""
+    """Resolve um caminho em relação a um diretório-base opcional."""
     resolved = Path(path)
     if not resolved.is_absolute() and base_dir is not None:
         resolved = Path(base_dir) / resolved
@@ -100,7 +100,7 @@ def _require_bool(config: ConfigDict, key: str, context: str) -> None:
 
 
 def validate_calibration_config(config: ConfigDict, context: str = "calibration") -> None:
-    """Validate calibration configuration keys, types, and feasible ranges."""
+    """Valida chaves, tipos e intervalos viáveis da configuração de calibração."""
     _reject_unknown(config, {"seed", "num_rows", "holdout_fraction", "income", "age", "region_weights"}, context)
     _require_positive_int(config, "num_rows", context)
     _require_non_negative_int(config, "seed", context)
@@ -143,7 +143,7 @@ def validate_calibration_config(config: ConfigDict, context: str = "calibration"
 
 
 def validate_generation_config(config: ConfigDict, context: str = "generation") -> None:
-    """Validate generation configuration."""
+    """Valida a configuração de geração."""
     _reject_unknown(config, {"rows", "batch_size", "max_batches", "date_format"}, context)
     _require_positive_int(config, "rows", context)
     _require_positive_int(config, "batch_size", context)
@@ -153,7 +153,7 @@ def validate_generation_config(config: ConfigDict, context: str = "generation") 
 
 
 def validate_export_config(config: ConfigDict, context: str = "export") -> None:
-    """Validate export configuration."""
+    """Valida a configuração de exportação."""
     _reject_unknown(config, {"xlsx", "primary_format"}, context)
     _require_bool(config, "xlsx", context)
     if config.get("primary_format", "parquet") != "parquet":
@@ -161,7 +161,7 @@ def validate_export_config(config: ConfigDict, context: str = "export") -> None:
 
 
 def validate_quality_gate_config(config: ConfigDict, context: str = "quality_gates") -> None:
-    """Validate quality gate configuration shape."""
+    """Valida a estrutura da configuração de quality gates."""
     allowed = {
         "assessment_mode",
         "min_evaluation_rows",
@@ -191,7 +191,7 @@ def validate_quality_gate_config(config: ConfigDict, context: str = "quality_gat
 
 
 def validate_model_config(model_name: str, config: ConfigDict) -> None:
-    """Validate synthesizer-specific configuration."""
+    """Valida a configuração específica de um sintetizador."""
     normalized = model_name.lower().replace("-", "_")
     if normalized == "programmatic":
         validate_calibration_config(config, "models.programmatic")
@@ -266,7 +266,7 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
 
 
 def validate_benchmark_config(config: ConfigDict) -> None:
-    """Validate benchmark configuration keys, types, and feasible ranges."""
+    """Valida chaves, tipos e intervalos viáveis da configuração de benchmark."""
     _reject_unknown(
         config,
         {
@@ -474,7 +474,7 @@ def validate_benchmark_config(config: ConfigDict) -> None:
 
 
 def validate_pipeline_config(config: ConfigDict) -> None:
-    """Validate the resolved pipeline configuration before execution."""
+    """Valida a configuração resolvida do pipeline antes da execução."""
     _reject_unknown(
         config,
         {

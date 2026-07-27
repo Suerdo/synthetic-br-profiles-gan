@@ -1,4 +1,4 @@
-"""Statistical quality metrics for synthetic tabular data."""
+"""Métricas de qualidade estatística para dados tabulares sintéticos."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _finite_numeric(series: pd.Series) -> pd.Series:
 
 
 def numeric_column_metrics(reference: pd.Series, synthetic: pd.Series) -> dict[str, Any]:
-    """Calculate detailed metrics for a numeric column."""
+    """Calcula métricas detalhadas para uma coluna numérica."""
     ref = _finite_numeric(reference)
     syn = _finite_numeric(synthetic)
     if ref.empty or syn.empty:
@@ -71,7 +71,7 @@ def numeric_column_metrics(reference: pd.Series, synthetic: pd.Series) -> dict[s
 
 
 def categorical_column_metrics(reference: pd.Series, synthetic: pd.Series) -> dict[str, Any]:
-    """Calculate categorical distribution metrics for one column."""
+    """Calcula métricas de distribuição categórica para uma coluna."""
     ref = reference.astype("string").fillna("<NA>").astype(str)
     syn = synthetic.astype("string").fillna("<NA>").astype(str)
     categories = sorted(set(ref.unique()).union(set(syn.unique())))
@@ -89,7 +89,7 @@ def categorical_column_metrics(reference: pd.Series, synthetic: pd.Series) -> di
 
 
 def correlation_metrics(reference: pd.DataFrame, synthetic: pd.DataFrame, numeric_columns: list[str]) -> dict[str, Any]:
-    """Compare Pearson and Spearman correlation matrices."""
+    """Compara matrizes de correlação de Pearson e Spearman."""
     available = [column for column in numeric_columns if column in reference.columns and column in synthetic.columns]
     if len(available) < 2:
         return {"pearson": {}, "spearman": {}, "summary": {"max_abs_difference": 0.0, "mean_abs_difference": 0.0}}
@@ -119,7 +119,7 @@ def categorical_relationship_metrics(
     synthetic: pd.DataFrame,
     pairs: list[tuple[str, str]],
 ) -> dict[str, Any]:
-    """Compare crosstab distributions for relevant categorical relationships."""
+    """Compara distribuições em crosstab para relações categóricas relevantes."""
     relationships: dict[str, Any] = {}
     for left, right in pairs:
         if left not in reference.columns or right not in reference.columns:
@@ -138,7 +138,7 @@ def categorical_relationship_metrics(
 
 
 def grouped_income_metrics(reference: pd.DataFrame, synthetic: pd.DataFrame) -> dict[str, Any]:
-    """Compare income summaries across important grouping columns."""
+    """Compara resumos de renda entre colunas importantes de agrupamento."""
     groups = ["Regiao", "Escolaridade", "Ocupacao"]
     metrics: dict[str, Any] = {}
     for group in groups:
@@ -175,7 +175,7 @@ def evaluate_against_reference(
     synthetic: pd.DataFrame,
     metadata: DatasetMetadata | None = None,
 ) -> dict[str, Any]:
-    """Evaluate synthetic data against one reference split."""
+    """Avalia dados sintéticos contra um split de referência."""
     metadata = metadata or default_metadata()
     numeric_columns = [column for column in metadata.numeric_columns() if column in reference.columns and column in synthetic.columns]
     categorical_columns = [
@@ -213,7 +213,7 @@ def evaluate_synthetic_data(
     metadata: DatasetMetadata | None = None,
     max_nearest_neighbor_rows: int = 1000,
 ) -> dict[str, Any]:
-    """Compare synthetic data with both train and holdout splits."""
+    """Compara dados sintéticos com os splits de treino e holdout."""
     metadata = metadata or default_metadata()
     synthetic_model = synthetic[[column for column in metadata.model_columns if column in synthetic.columns]].copy()
     return {

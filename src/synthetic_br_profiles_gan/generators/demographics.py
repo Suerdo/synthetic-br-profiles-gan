@@ -1,4 +1,4 @@
-"""Demographic generators and final profile post-processing."""
+"""Geradores demográficos e pós-processamento final de perfis."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from synthetic_br_profiles_gan.metadata import FINAL_COLUMNS, MODEL_COLUMNS
 
 
 def criar_faker(seed: int | None = None) -> Faker:
-    """Create a pt_BR Faker instance with an optional deterministic seed."""
+    """Cria uma instância pt_BR do Faker com seed determinística opcional."""
     if seed is not None:
         Faker.seed(seed)
     fake = Faker("pt_BR")
@@ -52,7 +52,7 @@ def _subtract_years(value: date, years: int) -> date:
 
 
 def calcular_idade(data_nascimento: str | date | datetime, referencia: datetime | date | None = None) -> int:
-    """Calculate exact age on the reference date."""
+    """Calcula a idade exata na data de referência."""
     reference = _as_date(referencia)
     birth = parse_data_nascimento(data_nascimento)
     age = reference.year - birth.year
@@ -62,7 +62,7 @@ def calcular_idade(data_nascimento: str | date | datetime, referencia: datetime 
 
 
 def parse_data_nascimento(value: str | date | datetime) -> date:
-    """Parse supported birth-date formats used by the project."""
+    """Interpreta os formatos de data de nascimento aceitos pelo projeto."""
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -82,7 +82,7 @@ def gerar_data_nascimento_por_idade(
     rng: random.Random | None = None,
     output_format: str = "%d/%m/%Y",
 ) -> str:
-    """Generate a birth date that yields exactly ``idade`` on ``referencia``."""
+    """Gera uma data de nascimento que resulta exatamente em ``idade`` na ``referencia``."""
     random_source = rng if rng is not None else random
     reference = _as_date(referencia)
     start = _subtract_years(reference, int(idade) + 1) + timedelta(days=1)
@@ -92,27 +92,27 @@ def gerar_data_nascimento_por_idade(
 
 
 def gerar_renda(rng: random.Random | None = None) -> float:
-    """Generate a skewed synthetic monthly income for legacy callers."""
+    """Gera uma renda mensal sintética assimétrica para chamadas legadas."""
     random_source = rng if rng is not None else random
     value = random_source.lognormvariate(8.0, 0.55)
     return round(max(800.0, min(value, 50000.0)), 2)
 
 
 def gerar_pessoa_base(rng: random.Random | None = None) -> dict[str, Any]:
-    """Generate one canonical calibration row for legacy callers."""
+    """Gera uma linha canônica de calibração para chamadas legadas."""
     random_source = rng if rng is not None else random
     seed = random_source.randint(0, 2_147_483_647)
     return generate_calibration_dataset(1, seed=seed).iloc[0].to_dict()
 
 
 def gerar_dataset_calibracao(n: int, rng: random.Random | None = None) -> pd.DataFrame:
-    """Generate the synthetic calibration dataset used by model training."""
+    """Gera o dataset sintético de calibração usado no treinamento dos modelos."""
     seed = rng.randint(0, 2_147_483_647) if rng is not None else None
     return generate_calibration_dataset(num_rows=n, seed=seed)
 
 
 def gerar_nome_por_genero(genero_label: str, fake: Faker) -> str:
-    """Generate a fictitious name using a configured gender strategy."""
+    """Gera um nome fictício usando uma estratégia configurada por gênero."""
     if genero_label == "Feminino":
         return f"{fake.first_name_female()} {fake.last_name()}"
     if genero_label == "Masculino":
@@ -166,7 +166,7 @@ def finalizar_perfis_sinteticos(
     rng: random.Random | None = None,
     date_format: str = "%Y-%m-%d",
 ) -> pd.DataFrame:
-    """Add context-aware derived fields and identifiers to model rows."""
+    """Adiciona campos derivados e identificadores contextuais às linhas do modelo."""
     random_source = rng if rng is not None else random
     normalized = _normalize_model_frame(df, random_source).reset_index(drop=True)
 

@@ -1,4 +1,4 @@
-"""Configurable approval gates for generated datasets."""
+"""Quality gates configuráveis para aprovação de datasets gerados."""
 
 from __future__ import annotations
 
@@ -23,66 +23,66 @@ DEFAULT_QUALITY_GATES: ConfigDict = {
 QUALITY_GATE_DOCUMENTATION: dict[str, dict[str, Any]] = {
     "min_evaluation_rows": {
         "metric": "row_counts.synthetic",
-        "interpretation": "Minimum synthetic sample size before statistical gates can support an approval claim.",
-        "unit": "rows",
+        "interpretation": "Tamanho mínimo da amostra sintética antes de gates estatísticos sustentarem uma afirmação de aprovação.",
+        "unit": "linhas",
         "limit": DEFAULT_QUALITY_GATES["min_evaluation_rows"],
-        "reason": "Small smoke runs validate mechanics, not statistical quality.",
-        "missing_behavior": "mandatory failure in approval mode; quarantine otherwise",
+        "reason": "Smoke runs pequenos validam a mecânica, não a qualidade estatística.",
+        "missing_behavior": "falha obrigatória no modo approval; quarentena nos demais modos",
     },
     "invalid_rows_max": {
         "metric": "validation.invalid_rows",
-        "interpretation": "Number of structurally invalid final rows.",
-        "unit": "rows",
+        "interpretation": "Quantidade de linhas finais estruturalmente inválidas.",
+        "unit": "linhas",
         "limit": 0,
-        "reason": "Datasets with invalid required structure must not be approved.",
-        "missing_behavior": "mandatory failure",
+        "reason": "Datasets com estrutura obrigatória inválida não devem ser aprovados.",
+        "missing_behavior": "falha obrigatória",
     },
     "duplicated_identifier_max": {
         "metric": "validation.reason_counts.*_duplicado for identifiers",
-        "interpretation": "Duplicated generated identifiers.",
-        "unit": "rows",
+        "interpretation": "Identificadores gerados duplicados.",
+        "unit": "linhas",
         "limit": 0,
-        "reason": "Identifier collisions create unusable synthetic records.",
-        "missing_behavior": "mandatory failure",
+        "reason": "Colisões de identificadores tornam registros sintéticos inutilizáveis.",
+        "missing_behavior": "falha obrigatória",
     },
     "null_required_fields_max": {
         "metric": "validation.reason_counts.null_required_fields",
-        "interpretation": "Null required values.",
-        "unit": "fields",
+        "interpretation": "Valores obrigatórios nulos.",
+        "unit": "campos",
         "limit": 0,
-        "reason": "Required fields must be complete.",
-        "missing_behavior": "mandatory failure",
+        "reason": "Campos obrigatórios devem estar completos.",
+        "missing_behavior": "falha obrigatória",
     },
     "exact_train_match_rate_max": {
         "metric": "evaluation.privacy.exact_train_match_rate",
-        "interpretation": "Exact matches to training rows over model columns only.",
-        "unit": "rate",
+        "interpretation": "Matches exatos com linhas de treinamento apenas sobre colunas de modelo.",
+        "unit": "taxa",
         "limit": 0.01,
-        "reason": "High exact match rate can indicate memorization.",
-        "missing_behavior": "mandatory failure",
+        "reason": "Taxa elevada de match exato pode indicar memorização.",
+        "missing_behavior": "falha obrigatória",
     },
     "total_variation_distance_max": {
         "metric": "max holdout categorical total variation distance",
-        "interpretation": "Largest categorical distribution difference against holdout.",
-        "unit": "distance in [0, 1]",
+        "interpretation": "Maior diferença de distribuição categórica contra o holdout.",
+        "unit": "distância em [0, 1]",
         "limit": 0.25,
-        "reason": "Default informational threshold for distribution drift.",
-        "missing_behavior": "optional failure when configured as optional",
+        "reason": "Limite informativo padrão para desvio de distribuição.",
+        "missing_behavior": "falha opcional quando configurada como opcional",
     },
     "correlation_difference_max": {
         "metric": "holdout correlation summary max_abs_difference",
-        "interpretation": "Largest absolute correlation matrix difference.",
-        "unit": "absolute correlation difference",
+        "interpretation": "Maior diferença absoluta entre matrizes de correlação.",
+        "unit": "diferença absoluta de correlação",
         "limit": 0.30,
-        "reason": "Default informational threshold for relationship drift.",
-        "missing_behavior": "optional failure when configured as optional",
+        "reason": "Limite informativo padrão para desvio nas relações.",
+        "missing_behavior": "falha opcional quando configurada como opcional",
     },
 }
 
 
 @dataclass(frozen=True)
 class QualityGateResult:
-    """Quality gate status and failure reasons."""
+    """Status dos quality gates e motivos de falha."""
 
     status: str
     failures: list[dict[str, Any]]
@@ -137,7 +137,7 @@ def evaluate_quality_gates(
     evaluation: dict[str, Any],
     config: ConfigDict | None = None,
 ) -> QualityGateResult:
-    """Evaluate quality gates and return approved/quarantined/rejected."""
+    """Avalia quality gates e retorna approved, quarantined ou rejected."""
     gates = {**DEFAULT_QUALITY_GATES, **(config or {})}
     assessment_mode = str(gates.get("assessment_mode", "experimental"))
     reason_counts = validation.get("reason_counts", {})

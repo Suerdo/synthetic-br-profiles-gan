@@ -1,4 +1,4 @@
-"""Command line interface for the synthetic profile pipeline."""
+"""Interface de linha de comando para o pipeline de perfis sintéticos."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _load_config(path: str | None) -> ConfigDict:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the CLI parser."""
+    """Cria o parser da CLI."""
     parser = argparse.ArgumentParser(description="Synthetic Brazilian profile generation pipeline.")
     parser.add_argument("--log-level", default="INFO", help="Python logging level.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -108,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def command_create_calibration(args: argparse.Namespace) -> int:
-    """Handle create-calibration."""
+    """Executa o comando create-calibration."""
     config = _load_config(args.config)
     output = Path(args.output) if args.output else Path("artifacts") / "calibration" / build_run_id()
     result = create_calibration(config.get("calibration", config), output)
@@ -117,7 +117,7 @@ def command_create_calibration(args: argparse.Namespace) -> int:
 
 
 def command_train(args: argparse.Namespace) -> int:
-    """Handle train."""
+    """Executa o comando train."""
     config = _load_config(args.config)
     metadata = default_metadata()
     if args.calibration:
@@ -133,7 +133,7 @@ def command_train(args: argparse.Namespace) -> int:
 
 
 def command_generate(args: argparse.Namespace) -> int:
-    """Handle generate."""
+    """Executa o comando generate."""
     config = deep_merge(DEFAULT_PIPELINE_CONFIG, _load_config(args.config))
     metadata = default_metadata()
     if args.model_path:
@@ -161,7 +161,7 @@ def command_generate(args: argparse.Namespace) -> int:
 
 
 def command_evaluate(args: argparse.Namespace) -> int:
-    """Handle evaluate."""
+    """Executa o comando evaluate."""
     metadata = default_metadata()
     reference = _read_table(args.reference)
     synthetic = _read_table(args.synthetic)
@@ -173,7 +173,7 @@ def command_evaluate(args: argparse.Namespace) -> int:
 
 
 def command_validate(args: argparse.Namespace) -> int:
-    """Handle validate."""
+    """Executa o comando validate."""
     config = deep_merge(DEFAULT_PIPELINE_CONFIG, _load_config(args.config))
     dataset = _read_table(args.input)
     report = validate_profile_dataframe(
@@ -189,7 +189,7 @@ def command_validate(args: argparse.Namespace) -> int:
 
 
 def command_pipeline(args: argparse.Namespace) -> int:
-    """Handle full pipeline."""
+    """Executa o pipeline completo."""
     config = deep_merge(DEFAULT_PIPELINE_CONFIG, _load_config(args.config))
     result = run_pipeline(config=config, model_name=args.model, require_approved=args.require_approved)
     LOGGER.info(
@@ -204,7 +204,7 @@ def command_pipeline(args: argparse.Namespace) -> int:
 
 
 def command_benchmark(args: argparse.Namespace) -> int:
-    """Handle benchmark."""
+    """Executa o comando benchmark."""
     config = _load_config(args.config)
     config.setdefault("benchmark", {})
     if args.models is not None:
@@ -229,7 +229,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI."""
+    """Executa a CLI."""
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(level=getattr(logging, str(args.log_level).upper()), format="%(levelname)s %(name)s %(message)s")

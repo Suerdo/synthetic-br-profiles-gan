@@ -1,4 +1,4 @@
-"""Run IDs, file hashes, and execution manifests."""
+"""Run IDs, hashes de arquivos e manifestos de execução."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from synthetic_br_profiles_gan.config import ConfigDict, config_hash
 
 
 def build_run_id(timestamp: datetime | None = None, suffix: str | None = None) -> str:
-    """Build a UTC timestamp run id with a short unique suffix."""
+    """Cria um run id com timestamp UTC e sufixo curto único."""
     moment = timestamp or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
@@ -27,7 +27,7 @@ def build_run_id(timestamp: datetime | None = None, suffix: str | None = None) -
 
 
 def hash_file(path: str | Path) -> str:
-    """Return the SHA256 hash of a file."""
+    """Retorna o hash SHA256 de um arquivo."""
     digest = hashlib.sha256()
     with Path(path).open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
@@ -36,7 +36,7 @@ def hash_file(path: str | Path) -> str:
 
 
 def get_git_commit(root: str | Path | None = None) -> str | None:
-    """Return the current git commit when available."""
+    """Retorna o commit Git atual quando disponível."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -51,7 +51,7 @@ def get_git_commit(root: str | Path | None = None) -> str | None:
 
 
 def package_versions(packages: list[str]) -> dict[str, str | None]:
-    """Collect installed versions for important libraries."""
+    """Coleta versões instaladas de bibliotecas importantes."""
     versions: dict[str, str | None] = {}
     for package in packages:
         try:
@@ -62,7 +62,7 @@ def package_versions(packages: list[str]) -> dict[str, str | None]:
 
 
 def environment_info() -> dict[str, Any]:
-    """Return platform, Python, and CPU/GPU availability information."""
+    """Retorna informações de plataforma, Python e disponibilidade de CPU/GPU."""
     gpu: dict[str, Any] = {"tensorflow": [], "torch_cuda_available": None}
     if "tensorflow" in sys.modules:
         import tensorflow as tf
@@ -103,7 +103,7 @@ def build_manifest(
     ended_at_utc: datetime,
     root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Build a manifest dictionary for a completed run."""
+    """Cria um dicionário de manifesto para uma execução concluída."""
     hashes = {
         key: hash_file(path)
         for key, path in artifact_paths.items()
@@ -127,7 +127,7 @@ def build_manifest(
 
 
 def write_json(payload: dict[str, Any], path: str | Path) -> Path:
-    """Write a JSON file with deterministic formatting."""
+    """Grava um arquivo JSON com formatação determinística."""
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as file:

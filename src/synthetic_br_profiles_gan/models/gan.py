@@ -1,4 +1,4 @@
-"""Low-level Keras components used by the SimpleTabularGAN baseline adapter."""
+"""Componentes Keras de baixo nível usados pelo adaptador SimpleTabularGAN."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _require_tensorflow():
 
 
 def build_generator(latent_dim: int, output_dim: int):
-    """Build the dense generator used by the original notebook baseline."""
+    """Cria o gerador denso usado pelo baseline original do notebook."""
     Sequential, layers, _ = _require_tensorflow()
     return Sequential(
         [
@@ -40,7 +40,7 @@ def build_generator(latent_dim: int, output_dim: int):
 
 
 def build_discriminator(input_dim: int):
-    """Build the binary discriminator for encoded tabular rows."""
+    """Cria o discriminador binário para linhas tabulares codificadas."""
     Sequential, layers, _ = _require_tensorflow()
     return Sequential(
         [
@@ -54,7 +54,7 @@ def build_discriminator(input_dim: int):
 
 
 def build_gan(generator, discriminator, latent_dim: int, learning_rate: float = 0.0001, beta_1: float = 0.5):
-    """Combine generator and discriminator into a trainable GAN."""
+    """Combina gerador e discriminador em uma GAN treinável."""
     Sequential, layers, Adam = _require_tensorflow()
     discriminator.trainable = False
     gan = Sequential([layers.Input(shape=(latent_dim,)), generator, discriminator], name="simple_tabular_gan")
@@ -88,12 +88,12 @@ def train_gan(
     metrics_every: int = 10,
     sample_metric_fn: Callable[[np.ndarray], dict[str, float]] | None = None,
 ) -> dict[str, Any]:
-    """Train the dense GAN using real epochs over all batches.
+    """Treina a GAN densa usando épocas reais sobre todos os batches.
 
-    The previous implementation used one random batch per loop and called that
-    loop an epoch. This routine uses shuffled full-dataset passes and records
-    batch counts, losses, discriminator accuracy, duration, seed, and optional
-    fixed-sample diagnostics.
+    A implementação anterior usava um batch aleatório por laço e chamava esse
+    laço de época. Esta rotina usa passagens embaralhadas pelo dataset completo
+    e registra contagens de batches, perdas, acurácia do discriminador, duração,
+    seed e diagnósticos opcionais de amostra fixa.
     """
     if data.size == 0:
         raise ValueError("Training data cannot be empty.")

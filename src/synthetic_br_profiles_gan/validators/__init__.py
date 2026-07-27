@@ -1,4 +1,4 @@
-"""Validadores estruturais para os perfis sinteticos."""
+"""Validadores estruturais para os perfis sintéticos."""
 
 from synthetic_br_profiles_gan.validators.brazilian import (
     avaliar_regras_bruto,

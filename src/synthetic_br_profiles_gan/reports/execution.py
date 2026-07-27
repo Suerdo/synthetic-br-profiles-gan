@@ -1,4 +1,4 @@
-"""Persistencia dos artefatos gerados pelo pipeline."""
+"""Persistência dos artefatos gerados pelo pipeline."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def exportar_resultados(
     dataset_filename: str = "dados_sinteticos_realistas.xlsx",
     report_filename: str = "relatorio_execucao.json",
 ) -> dict[str, Path]:
-    """Exporta dataset e relatorio de execucao em um diretorio controlado."""
+    """Exporta dataset e relatório de execução em um diretório controlado."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 

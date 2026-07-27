@@ -1,4 +1,4 @@
-"""Subprocess worker for isolated operational capacity benchmark runs."""
+"""Worker de subprocesso para execuções isoladas do benchmark de capacidade operacional."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from synthetic_br_profiles_gan.pipeline import run_pipeline_on_splits
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the worker CLI parser."""
+    """Cria o parser da CLI do worker."""
     parser = argparse.ArgumentParser(description="Run one isolated capacity benchmark model.")
     parser.add_argument("--config", required=True)
     parser.add_argument("--model", required=True)
@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one model/tamanho combination and write a structured result."""
+    """Executa uma combinação de modelo e tamanho e grava um resultado estruturado."""
     args = build_parser().parse_args(argv)
     output_path = Path(args.output)
     try:

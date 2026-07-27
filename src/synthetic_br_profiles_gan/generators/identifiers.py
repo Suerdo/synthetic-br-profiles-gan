@@ -1,8 +1,8 @@
-"""Generators for fictitious Brazilian identifiers and phone numbers.
+"""Geradores de identificadores brasileiros fictícios e telefones.
 
-The generated values are local synthetic artifacts. The module never queries
-public or private registries and must not be used to claim that a document or
-phone number belongs, or does not belong, to a real person.
+Os valores gerados são artefatos sintéticos locais. O módulo nunca consulta
+cadastros públicos ou privados e não deve ser usado para afirmar que um
+documento ou telefone pertence, ou não pertence, a uma pessoa real.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def _random_source(rng: random.Random | None = None) -> random.Random:
 
 
 def gerar_cpf(rng: random.Random | None = None) -> str:
-    """Generate a masked CPF with mathematically valid check digits."""
+    """Gera um CPF mascarado com dígitos verificadores matematicamente válidos."""
     random_source = _random_source(rng)
 
     def calc_digit(digits: list[str]) -> str:
@@ -34,7 +34,7 @@ def gerar_cpf(rng: random.Random | None = None) -> str:
 
 
 def gerar_cnh(rng: random.Random | None = None) -> str:
-    """Generate an 11-digit CNH-like number with local check digits."""
+    """Gera um número semelhante a CNH com 11 dígitos e verificadores locais."""
     random_source = _random_source(rng)
     number = [random_source.randint(0, 9) for _ in range(9)]
 
@@ -50,7 +50,7 @@ def gerar_cnh(rng: random.Random | None = None) -> str:
 
 
 def gerar_rg(rng: random.Random | None = None) -> str:
-    """Generate a fictitious RG in the project format 00.000.000-0."""
+    """Gera um RG fictício no formato do projeto 00.000.000-0."""
     random_source = _random_source(rng)
     number = [str(random_source.randint(0, 9)) for _ in range(8)]
     digit = random_source.randint(0, 9)
@@ -67,7 +67,7 @@ def _titulo_eleitor_digits(number: str, uf_code: str) -> str:
 
 
 def gerar_titulo_eleitor(rng: random.Random | None = None, uf_codigo: int | None = None) -> str:
-    """Generate a fictitious voter title with the local check-digit rule."""
+    """Gera um título de eleitor fictício com a regra local de dígitos verificadores."""
     random_source = _random_source(rng)
     number = "".join(str(random_source.randint(0, 9)) for _ in range(8))
     uf = f"{uf_codigo if uf_codigo is not None else random_source.randint(1, 28):02d}"
@@ -80,7 +80,7 @@ def gerar_telefone(
     estado: str | None = None,
     ddd: int | None = None,
 ) -> str:
-    """Generate a fictitious Brazilian mobile phone compatible with a state or DDD."""
+    """Gera um telefone celular brasileiro fictício compatível com estado ou DDD."""
     random_source = _random_source(rng)
     if ddd is None:
         ddd_pool = STATE_DDDS.get(str(estado), VALID_DDDS) if estado else VALID_DDDS

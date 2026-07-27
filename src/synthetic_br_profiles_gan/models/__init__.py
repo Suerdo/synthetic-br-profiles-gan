@@ -1,4 +1,4 @@
-"""Model implementations and preprocessing used by the pipeline."""
+"""Implementações de modelos e pré-processamento usados pelo pipeline."""
 
 from synthetic_br_profiles_gan.models.base import TabularSynthesizer, create_synthesizer
 from synthetic_br_profiles_gan.models.ctgan import CTGANSynthesizer

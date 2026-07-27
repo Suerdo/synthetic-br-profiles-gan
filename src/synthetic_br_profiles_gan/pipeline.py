@@ -1,4 +1,4 @@
-"""Pipeline services for Brazilian synthetic profile experiments."""
+"""Serviços de pipeline para experimentos com perfis sintéticos brasileiros."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ DEFAULT_PIPELINE_CONFIG: ConfigDict = {
 
 
 def create_calibration(config: ConfigDict | None = None, output_dir: str | Path | None = None) -> dict[str, Any]:
-    """Create calibration, train, and holdout splits."""
+    """Cria a calibração e os splits de treino e holdout."""
     effective = deep_merge(DEFAULT_CALIBRATION_CONFIG, config or {})
     validate_calibration_config(effective)
     metadata = default_metadata()
@@ -129,7 +129,7 @@ def train_synthesizer(
     config: ConfigDict | None = None,
     output_dir: str | Path | None = None,
 ):
-    """Train one synthesizer on the train split only."""
+    """Treina um sintetizador usando somente o split de treino."""
     model_config = _resolved_model_config(model_name, config or {})
     validate_model_config(model_name, model_config)
     synthesizer = create_synthesizer(model_name, model_config)
@@ -150,7 +150,7 @@ def generate_profiles(
     max_batches: int = 20,
     date_format: str = "%Y-%m-%d",
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
-    """Generate final profiles and account for accepted, rejected, and surplus rows."""
+    """Gera perfis finais e contabiliza linhas aceitas, rejeitadas e excedentes."""
     fake = criar_faker(seed)
     rng = random.Random(seed)
     candidates: list[pd.DataFrame] = []
@@ -213,7 +213,7 @@ def run_pipeline_on_splits(
     started_at_utc: datetime | None = None,
     resource_probe: Callable[[], float | None] | None = None,
 ) -> dict[str, Any]:
-    """Run training, generation, validation, evaluation, gates, and export on provided splits."""
+    """Executa treino, geração, validação, avaliação, gates e exportação nos splits fornecidos."""
     if train is None or holdout is None:
         raise ValueError("run_pipeline_on_splits requires train and holdout dataframes.")
     started = started_at_utc or datetime.now(timezone.utc)
@@ -375,7 +375,7 @@ def run_pipeline(
     model_name: str | None = None,
     require_approved: bool = False,
 ) -> dict[str, Any]:
-    """Run calibration, train, generation, validation, evaluation, gates, and export."""
+    """Executa calibração, treino, geração, validação, avaliação, gates e exportação."""
     started = datetime.now(timezone.utc)
     effective = deep_merge(DEFAULT_PIPELINE_CONFIG, config or {})
     selected_model = model_name or str(effective.get("model", "programmatic"))
@@ -403,10 +403,10 @@ def gerar_sinteticos_com_metricas(
     score_threshold: float = 0.50,
     max_batches: int = 200,
 ) -> tuple[pd.DataFrame, np.ndarray, dict]:
-    """Legacy candidate generation without discriminator-threshold acceptance.
+    """Geração legada de candidatos sem aceitação por limiar do discriminador.
 
-    ``score_threshold`` is retained only for backward-compatible diagnostics.
-    Acceptance is based on structural/domain rules, not on calibrated realism.
+    ``score_threshold`` é mantido apenas para diagnósticos retrocompatíveis.
+    A aceitação se baseia em regras estruturais e de domínio, não em realismo calibrado.
     """
     started = time.perf_counter()
     accepted_scaled: list[np.ndarray] = []
@@ -493,7 +493,7 @@ def executar_pipeline(
     reference_date: datetime | None = None,
     model_name: str = "simple_gan",
 ) -> dict:
-    """Backward-compatible entry point used by the legacy script."""
+    """Ponto de entrada retrocompatível usado pelo script legado."""
     reference = (reference_date or datetime.now()).strftime("%Y-%m-%d")
     config = deep_merge(
         DEFAULT_PIPELINE_CONFIG,

@@ -1,4 +1,4 @@
-"""Artifact directory and export helpers."""
+"""Diretórios de artefatos e auxiliares de exportação."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from synthetic_br_profiles_gan.manifest import write_json
 
 @dataclass(frozen=True)
 class RunArtifactPaths:
-    """Important paths for a run."""
+    """Caminhos importantes de uma execução."""
 
     run_dir: Path
     approved_dir: Path
@@ -23,7 +23,7 @@ class RunArtifactPaths:
 
 
 def prepare_run_directories(artifacts_root: str | Path, run_id: str, status: str) -> RunArtifactPaths:
-    """Create run, approved, and quarantine directories."""
+    """Cria os diretórios de execução, aprovação e quarentena."""
     run_dir = Path(artifacts_root) / "runs" / run_id
     approved_dir = run_dir / "approved"
     quarantine_dir = run_dir / "quarantine"
@@ -35,14 +35,14 @@ def prepare_run_directories(artifacts_root: str | Path, run_id: str, status: str
 
 
 def model_artifact_dir(artifacts_root: str | Path, model_name: str, run_id: str) -> Path:
-    """Return the directory for a model artifact."""
+    """Retorna o diretório de artefato de um modelo."""
     path = Path(artifacts_root) / "models" / model_name / run_id
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def export_dataset(dataset: pd.DataFrame, output_dir: str | Path, export_xlsx: bool = True) -> dict[str, Path]:
-    """Export a dataset as Parquet and optionally XLSX."""
+    """Exporta um dataset em Parquet e, opcionalmente, XLSX."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     paths = {"dataset_parquet": output_path / "dataset.parquet"}
@@ -63,7 +63,7 @@ def save_run_artifacts(
     paths: RunArtifactPaths,
     export_xlsx: bool = True,
 ) -> dict[str, Path]:
-    """Save all run artifacts under approved or quarantine."""
+    """Salva todos os artefatos da execução em approved ou quarantine."""
     artifact_paths = export_dataset(dataset, paths.status_dir, export_xlsx=export_xlsx)
     artifact_paths["validation"] = write_json(validation, paths.status_dir / "validation.json")
     artifact_paths["evaluation"] = write_json(evaluation, paths.status_dir / "evaluation.json")

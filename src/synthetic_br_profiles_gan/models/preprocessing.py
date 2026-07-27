@@ -1,4 +1,4 @@
-"""Tabular preprocessing for numeric and categorical model columns."""
+"""Pré-processamento tabular para colunas numéricas e categóricas do modelo."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from synthetic_br_profiles_gan.metadata import DatasetMetadata
 
 @dataclass
 class NumericTransform:
-    """Min/max state for one numeric column."""
+    """Estado de mínimo e máximo de uma coluna numérica."""
 
     minimum: float
     maximum: float
@@ -24,13 +24,13 @@ class NumericTransform:
 
 @dataclass
 class CategoricalTransform:
-    """One-hot state for one categorical column."""
+    """Estado one-hot de uma coluna categórica."""
 
     categories: list[Any]
 
 
 class DataPreprocessor:
-    """Encode tabular data into dense numeric vectors and invert it."""
+    """Codifica dados tabulares em vetores numéricos densos e reverte a codificação."""
 
     def __init__(self, metadata: DatasetMetadata | None = None) -> None:
         self.metadata = metadata
@@ -40,7 +40,7 @@ class DataPreprocessor:
         self.feature_slices: dict[str, slice] = {}
 
     def fit(self, df: pd.DataFrame) -> "DataPreprocessor":
-        """Fit preprocessing state to a dataframe."""
+        """Ajusta o estado de pré-processamento a um DataFrame."""
         self.columns = list(self.metadata.model_columns if self.metadata else df.columns)
         offset = 0
         for column in self.columns:
@@ -68,11 +68,11 @@ class DataPreprocessor:
         return self
 
     def fit_transform(self, df: pd.DataFrame) -> np.ndarray:
-        """Fit and transform a dataframe."""
+        """Ajusta e transforma um DataFrame."""
         return self.fit(df).transform(df)
 
     def transform(self, df: pd.DataFrame) -> np.ndarray:
-        """Transform a dataframe into a numeric matrix."""
+        """Transforma um DataFrame em uma matriz numérica."""
         if self.columns is None:
             raise RuntimeError("DataPreprocessor must be fitted before transform.")
         arrays: list[np.ndarray] = []
@@ -95,7 +95,7 @@ class DataPreprocessor:
         return np.hstack(arrays).astype(np.float32)
 
     def inverse_transform(self, data: np.ndarray) -> pd.DataFrame:
-        """Invert a numeric matrix back into the tabular domain."""
+        """Inverte uma matriz numérica de volta para o domínio tabular."""
         if self.columns is None:
             raise RuntimeError("DataPreprocessor must be fitted before inverse_transform.")
         matrix = np.asarray(data)
@@ -118,13 +118,13 @@ class DataPreprocessor:
 
     @property
     def output_dim(self) -> int:
-        """Return the encoded dimensionality."""
+        """Retorna a dimensionalidade codificada."""
         if self.columns is None:
             raise RuntimeError("DataPreprocessor must be fitted before output_dim is available.")
         return max(column_slice.stop for column_slice in self.feature_slices.values())
 
     def save(self, path: str | Path) -> Path:
-        """Persist preprocessing state with pickle."""
+        """Persiste o estado de pré-processamento com pickle."""
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("wb") as file:
@@ -133,7 +133,7 @@ class DataPreprocessor:
 
     @classmethod
     def load(cls, path: str | Path) -> "DataPreprocessor":
-        """Load preprocessing state from pickle."""
+        """Carrega o estado de pré-processamento a partir de pickle."""
         with Path(path).open("rb") as file:
             loaded = pickle.load(file)
         if not isinstance(loaded, cls):

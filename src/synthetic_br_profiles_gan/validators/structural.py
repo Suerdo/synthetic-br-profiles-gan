@@ -1,4 +1,4 @@
-"""Centralized schema, domain, semantic, and identifier validation."""
+"""Validação centralizada de schema, domínio, semântica e identificadores."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from synthetic_br_profiles_gan.validators.brazilian import (
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """Validation report plus row mask for internal candidate selection."""
+    """Relatório de validação e máscara de linhas para seleção interna de candidatos."""
 
     report: dict[str, Any]
     valid_mask: pd.Series
@@ -51,7 +51,7 @@ def validate_profile_dataframe(
     final: bool = True,
     reference_date: str | date | datetime | None = None,
 ) -> ValidationResult:
-    """Validate a model or final profile dataframe against project metadata."""
+    """Valida um DataFrame de perfil final ou de modelo contra os metadados do projeto."""
     metadata = metadata or default_metadata()
     required_columns = metadata.required_columns(final=final)
     valid_mask = pd.Series(True, index=df.index)
@@ -218,5 +218,5 @@ def validate_core_dataframe(
     df: pd.DataFrame,
     metadata: DatasetMetadata | None = None,
 ) -> ValidationResult:
-    """Validate only model columns before derived attributes are generated."""
+    """Valida apenas colunas do modelo antes da geração de atributos derivados."""
     return validate_profile_dataframe(df, metadata=metadata, final=False)
