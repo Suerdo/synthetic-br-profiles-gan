@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import gc
 import json
 import math
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -50,6 +53,7 @@ class ResourceLimitExceeded(PipelineError):
 DEFAULT_BENCHMARK_CONFIG: ConfigDict = {
     "benchmark": {
         "name": "pilot",
+        "type": "quality",
         "models": ["programmatic", "simple_gan", "ctgan"],
         "seeds": [11, 22, 33],
         "calibration_rows": 5000,
@@ -95,7 +99,13 @@ DEFAULT_BENCHMARK_CONFIG: ConfigDict = {
         "export_json": True,
         "export_individual_xlsx": False,
     },
-    "execution": {"parallelism": 1, "warmup_backends": False, "rotate_model_order_by_seed": False},
+    "execution": {
+        "parallelism": 1,
+        "warmup_backends": False,
+        "rotate_model_order_by_seed": False,
+        "subprocess_isolation": False,
+        "subprocess_timeout_seconds": None,
+    },
     "resource_limits": {
         "max_training_seconds_per_run": None,
         "max_total_seconds_per_run": None,
@@ -186,6 +196,46 @@ RUN_SUMMARY_COLUMNS = [
     "ctgan_total_batches_inferred",
     "resource_limited",
 ]
+CAPACITY_RESULT_COLUMNS = [
+    "benchmark_id",
+    "model",
+    "seed",
+    "train_size",
+    "holdout_size",
+    "calibration_rows",
+    "status",
+    "quality_status",
+    "run_id",
+    "failure_stage",
+    "failure_type",
+    "exit_code",
+    "duration_seconds",
+    "training_seconds",
+    "generation_seconds",
+    "validation_seconds",
+    "evaluation_seconds",
+    "export_seconds",
+    "memory_initial_mb",
+    "peak_memory_mb",
+    "memory_incremental_mb",
+    "model_size_mb",
+    "artifact_size_mb",
+    "backend_warmup_seconds",
+    "batches_per_epoch",
+    "generator_updates",
+    "discriminator_updates",
+    "mean_epoch_seconds",
+    "ctgan_batches_per_epoch_inferred",
+    "ctgan_total_batches_inferred",
+    "backend",
+    "cpu_count",
+    "gpu",
+    "library_versions",
+    "stdout_log",
+    "stderr_log",
+    "result_json",
+]
+CAPACITY_COMPLETED_STATUSES = {"completed", "quality_quarantined", "quality_rejected"}
 
 
 def build_benchmark_id(name: str, timestamp: datetime | None = None) -> str:
@@ -317,11 +367,637 @@ class ResourceMonitor:
                 self.peak_memory_mb = max(current, self.peak_memory_mb or current)
 
 
+def run_capacity_benchmark(
+    config: ConfigDict,
+    started_at: datetime | None = None,
+    started_perf: float | None = None,
+) -> dict[str, Any]:
+    """Run an operational capacity benchmark with isolated model subprocesses."""
+    started = started_at or datetime.now(timezone.utc)
+    perf_start = started_perf or time.perf_counter()
+    benchmark_id = build_benchmark_id(str(config["benchmark"]["name"]), started)
+    benchmark_dir = Path(config["outputs"]["base_directory"]) / benchmark_id
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    save_yaml_config(config, benchmark_dir / "benchmark_config.yaml")
+    LOGGER.info("capacity_benchmark_started", extra={"benchmark_id": benchmark_id})
+
+    metadata = default_metadata()
+    rows: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    run_references: list[dict[str, Any]] = []
+    stop_after_failure: dict[str, int] = {}
+    continue_on_error = bool(config["benchmark"].get("continue_on_error", True))
+
+    for seed in config["benchmark"]["seeds"]:
+        seed = int(seed)
+        for size_spec in train_size_specs(config):
+            train_size = int(size_spec["train_size"])
+            holdout_size = int(size_spec["holdout_size"])
+            calibration_rows = int(size_spec["calibration_rows"])
+            active_models = [
+                model
+                for model in config["benchmark"]["models"]
+                if model not in stop_after_failure or train_size <= stop_after_failure[model]
+            ]
+            for model in config["benchmark"]["models"]:
+                if model in stop_after_failure and train_size > stop_after_failure[model]:
+                    row = _capacity_skipped_row(benchmark_id, model, seed, train_size, holdout_size, calibration_rows, stop_after_failure[model])
+                    rows.append(row)
+                    failure = _capacity_failure_from_row(row, "progression", "SkippedAfterFailure", row["failure_type"])
+                    failures.append(failure)
+                    run_references.append(_capacity_run_reference(row))
+            if not active_models:
+                continue
+
+            try:
+                calibration_started = time.perf_counter()
+                calibration_config = _calibration_config_for_seed(config, seed, calibration_rows=calibration_rows)
+                calibration = generate_calibration_dataset(config=calibration_config)
+                calibration_seconds = float(time.perf_counter() - calibration_started)
+                split_started = time.perf_counter()
+                train, holdout = split_train_holdout(
+                    calibration,
+                    holdout_fraction=float(config["benchmark"]["holdout_fraction"]),
+                    seed=seed,
+                    train_rows=train_size,
+                    holdout_rows=holdout_size,
+                )
+                split_seconds = float(time.perf_counter() - split_started)
+                split_dir = _calibration_output_dir(benchmark_dir, seed, train_size)
+                split_paths = save_calibration_splits(calibration, train, holdout, split_dir, metadata=metadata)
+            except Exception as exc:
+                failure = _record_failure(benchmark_dir, "all", seed, "calibration", exc, train_size=train_size, holdout_size=holdout_size)
+                failures.append(failure)
+                if not continue_on_error:
+                    raise
+                continue
+            finally:
+                try:
+                    del calibration
+                    del train
+                    del holdout
+                except UnboundLocalError:
+                    pass
+                gc.collect()
+
+            calibration_timings = {"calibration_seconds": calibration_seconds, "split_seconds": split_seconds}
+            for model in active_models:
+                row = _run_capacity_model_subprocess(
+                    config=config,
+                    benchmark_id=benchmark_id,
+                    benchmark_dir=benchmark_dir,
+                    model=model,
+                    seed=seed,
+                    train_size=train_size,
+                    holdout_size=holdout_size,
+                    calibration_rows=calibration_rows,
+                    train_path=split_paths["train"],
+                    holdout_path=split_paths["holdout"],
+                    metadata_path=split_paths["metadata"],
+                    calibration_timings=calibration_timings,
+                )
+                rows.append(row)
+                run_references.append(_capacity_run_reference(row))
+                if row["status"] not in CAPACITY_COMPLETED_STATUSES:
+                    stop_after_failure.setdefault(model, train_size)
+                    failures.append(_capacity_failure_from_row(row, row.get("failure_stage") or "subprocess", row.get("failure_type") or row["status"], row["status"]))
+                    if not continue_on_error:
+                        ended = datetime.now(timezone.utc)
+                        outputs = _write_capacity_outputs(
+                            benchmark_dir,
+                            config,
+                            benchmark_id,
+                            started,
+                            ended,
+                            float(time.perf_counter() - perf_start),
+                            rows,
+                            failures,
+                            run_references,
+                        )
+                        raise PipelineError(f"Capacity benchmark stopped after {model} train_size={train_size}: {row['status']}")
+
+    ended = datetime.now(timezone.utc)
+    completed_runs = sum(1 for row in rows if row["status"] in CAPACITY_COMPLETED_STATUSES)
+    failed_runs = sum(1 for row in rows if row["status"] not in CAPACITY_COMPLETED_STATUSES)
+    overall_status = "completed" if failed_runs == 0 else "completed_with_failures" if completed_runs else "failed"
+    outputs = _write_capacity_outputs(
+        benchmark_dir=benchmark_dir,
+        config=config,
+        benchmark_id=benchmark_id,
+        started_at=started,
+        ended_at=ended,
+        duration_seconds=float(time.perf_counter() - perf_start),
+        rows=rows,
+        failures=failures,
+        run_references=run_references,
+    )
+    LOGGER.info(
+        "capacity_benchmark_finished",
+        extra={"benchmark_id": benchmark_id, "status": overall_status, "completed_runs": completed_runs, "failed_runs": failed_runs},
+    )
+    return {
+        "benchmark_id": benchmark_id,
+        "status": overall_status,
+        "benchmark_dir": benchmark_dir,
+        "expected_runs": len(benchmark_matrix(config)),
+        "completed_runs": completed_runs,
+        "failed_runs": failed_runs,
+        "capacity_rows": rows,
+        "capacity_summary": calculate_capacity_limits(rows, config["benchmark"]["models"], config["benchmark"].get("train_sizes", [])),
+        "failures": failures,
+        "paths": outputs,
+        "duration_seconds": float((ended - started).total_seconds()),
+    }
+
+
+def _run_capacity_model_subprocess(
+    config: ConfigDict,
+    benchmark_id: str,
+    benchmark_dir: Path,
+    model: str,
+    seed: int,
+    train_size: int,
+    holdout_size: int,
+    calibration_rows: int,
+    train_path: Path,
+    holdout_path: Path,
+    metadata_path: Path,
+    calibration_timings: dict[str, float],
+) -> dict[str, Any]:
+    subprocess_dir = benchmark_dir / "subprocesses" / model / f"train-{train_size}"
+    subprocess_dir.mkdir(parents=True, exist_ok=True)
+    run_config = _pipeline_config_for_run(config, model, seed, calibration_rows=calibration_rows)
+    run_config_path = save_yaml_config(run_config, subprocess_dir / "run_config.yaml")
+    result_path = subprocess_dir / "result.json"
+    stdout_path = subprocess_dir / "stdout.log"
+    stderr_path = subprocess_dir / "stderr.log"
+    command = [
+        sys.executable,
+        "-m",
+        "synthetic_br_profiles_gan.benchmark_worker",
+        "--config",
+        str(run_config_path),
+        "--model",
+        model,
+        "--train",
+        str(train_path),
+        "--holdout",
+        str(holdout_path),
+        "--metadata",
+        str(metadata_path),
+        "--output",
+        str(result_path),
+    ]
+    if bool(config.get("execution", {}).get("warmup_backends", False)):
+        command.append("--warmup-backend")
+    execution = run_capacity_subprocess(
+        command=command,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        resource_limits=config.get("resource_limits", {}),
+        timeout_seconds=config.get("execution", {}).get("subprocess_timeout_seconds"),
+    )
+    payload = _load_capacity_worker_result(result_path)
+    row = _capacity_row_from_worker_payload(
+        benchmark_id=benchmark_id,
+        model=model,
+        seed=seed,
+        train_size=train_size,
+        holdout_size=holdout_size,
+        calibration_rows=calibration_rows,
+        calibration_timings=calibration_timings,
+        payload=payload,
+        execution=execution,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        result_path=result_path,
+    )
+    if row["status"] in CAPACITY_COMPLETED_STATUSES:
+        limit_failure = _capacity_limit_failure(row, config.get("resource_limits", {}))
+        if limit_failure is not None:
+            row.update(limit_failure)
+    return row
+
+
+def run_capacity_subprocess(
+    command: list[str],
+    stdout_path: Path,
+    stderr_path: Path,
+    resource_limits: dict[str, Any] | None = None,
+    timeout_seconds: float | int | None = None,
+    poll_interval_seconds: float = 0.2,
+) -> dict[str, Any]:
+    """Run a capacity worker and monitor resident memory of its process tree."""
+    limits = resource_limits or {}
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+    memory_initial: float | None = None
+    memory_peak: float | None = None
+    limit_reason: str | None = None
+    timed_out = False
+    with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open("w", encoding="utf-8") as stderr_file:
+        process = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file, text=True)
+        while True:
+            memory = _process_tree_rss_mb(process.pid)
+            if memory is not None:
+                if memory_initial is None:
+                    memory_initial = memory
+                memory_peak = max(memory_peak or memory, memory)
+            elapsed = time.perf_counter() - started
+            max_total = _limit_value(limits.get("max_total_seconds_per_run"))
+            max_memory = _limit_value(limits.get("max_peak_memory_mb"))
+            timeout_limit = _limit_value(timeout_seconds)
+            if max_memory is not None and memory_peak is not None and memory_peak > max_memory:
+                limit_reason = f"peak_memory_mb={memory_peak:.3f} exceeded limit {max_memory:.3f}"
+                _terminate_process_tree(process)
+                break
+            if max_total is not None and elapsed > max_total:
+                limit_reason = f"duration_seconds={elapsed:.3f} exceeded limit {max_total:.3f}"
+                _terminate_process_tree(process)
+                break
+            if timeout_limit is not None and elapsed > timeout_limit:
+                timed_out = True
+                limit_reason = f"subprocess_timeout_seconds={elapsed:.3f} exceeded limit {timeout_limit:.3f}"
+                _terminate_process_tree(process)
+                break
+            if process.poll() is not None:
+                break
+            time.sleep(float(poll_interval_seconds))
+        exit_code = process.wait()
+    duration = float(time.perf_counter() - started)
+    if memory_peak is None:
+        memory_peak = memory_initial
+    return {
+        "exit_code": int(exit_code),
+        "duration_seconds": duration,
+        "memory_initial_mb": memory_initial,
+        "peak_memory_mb": memory_peak,
+        "memory_incremental_mb": None if memory_initial is None or memory_peak is None else float(memory_peak - memory_initial),
+        "resource_limited": limit_reason is not None,
+        "limit_reason": limit_reason,
+        "timed_out": timed_out,
+    }
+
+
+def _process_tree_rss_mb(pid: int) -> float | None:
+    try:
+        import psutil
+
+        process = psutil.Process(pid)
+        processes = [process, *process.children(recursive=True)]
+        total = 0
+        for item in processes:
+            try:
+                total += item.memory_info().rss
+            except psutil.Error:
+                continue
+        return float(total / (1024 * 1024))
+    except Exception:
+        return None
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    try:
+        import psutil
+
+        parent = psutil.Process(process.pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.Error:
+                continue
+        try:
+            parent.terminate()
+        except psutil.Error:
+            pass
+        gone, alive = psutil.wait_procs([parent, *children], timeout=5)
+        for item in alive:
+            try:
+                item.kill()
+            except psutil.Error:
+                continue
+    except Exception:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def _limit_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_capacity_worker_result(result_path: Path) -> dict[str, Any] | None:
+    if not result_path.exists():
+        return None
+    try:
+        with result_path.open(encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _capacity_row_from_worker_payload(
+    benchmark_id: str,
+    model: str,
+    seed: int,
+    train_size: int,
+    holdout_size: int,
+    calibration_rows: int,
+    calibration_timings: dict[str, float],
+    payload: dict[str, Any] | None,
+    execution: dict[str, Any],
+    stdout_path: Path,
+    stderr_path: Path,
+    result_path: Path,
+) -> dict[str, Any]:
+    if execution.get("resource_limited"):
+        status = "resource_limited"
+        failure_stage = "resource_monitor"
+        failure_type = "ResourceLimitExceeded"
+        quality_status = None
+    elif payload is None:
+        status = "failed"
+        failure_stage = "subprocess"
+        failure_type = "MissingWorkerResult"
+        quality_status = None
+    else:
+        status = str(payload.get("technical_status") or "failed")
+        failure_stage = payload.get("failure_stage")
+        failure_type = payload.get("failure_type")
+        quality_status = payload.get("quality_status")
+
+    stage = payload.get("stage_durations", {}) if payload else {}
+    env = payload.get("environment", {}) if payload else {}
+    versions = env.get("library_versions", {}) if isinstance(env, dict) else {}
+    gpu = env.get("gpu", {}) if isinstance(env, dict) else {}
+    row = {
+        "benchmark_id": benchmark_id,
+        "model": model,
+        "seed": int(seed),
+        "train_size": int(train_size),
+        "holdout_size": int(holdout_size),
+        "calibration_rows": int(calibration_rows),
+        "status": status,
+        "quality_status": quality_status,
+        "run_id": payload.get("run_id") if payload else None,
+        "failure_stage": failure_stage,
+        "failure_type": failure_type,
+        "exit_code": execution.get("exit_code"),
+        "duration_seconds": payload.get("duration_seconds") if payload and payload.get("duration_seconds") is not None else execution.get("duration_seconds"),
+        "calibration_seconds": calibration_timings.get("calibration_seconds"),
+        "split_seconds": calibration_timings.get("split_seconds"),
+        "training_seconds": stage.get("training_seconds"),
+        "generation_seconds": stage.get("generation_seconds"),
+        "validation_seconds": stage.get("validation_seconds"),
+        "evaluation_seconds": stage.get("evaluation_seconds"),
+        "export_seconds": stage.get("export_seconds"),
+        "memory_initial_mb": execution.get("memory_initial_mb"),
+        "peak_memory_mb": execution.get("peak_memory_mb"),
+        "memory_incremental_mb": execution.get("memory_incremental_mb"),
+        "model_size_mb": payload.get("model_size_mb") if payload else None,
+        "artifact_size_mb": payload.get("artifact_size_mb") if payload else None,
+        "backend_warmup_seconds": payload.get("backend_warmup_seconds") if payload else None,
+        "batches_per_epoch": payload.get("batches_per_epoch") if payload else None,
+        "generator_updates": payload.get("generator_updates") if payload else None,
+        "discriminator_updates": payload.get("discriminator_updates") if payload else None,
+        "mean_epoch_seconds": payload.get("mean_epoch_seconds") if payload else None,
+        "ctgan_batches_per_epoch_inferred": payload.get("ctgan_batches_per_epoch_inferred") if payload else None,
+        "ctgan_total_batches_inferred": payload.get("ctgan_total_batches_inferred") if payload else None,
+        "backend": payload.get("backend") if payload else model,
+        "cpu_count": os.cpu_count(),
+        "gpu": json.dumps(gpu, ensure_ascii=False, sort_keys=True, default=str),
+        "library_versions": json.dumps(versions, ensure_ascii=False, sort_keys=True, default=str),
+        "stdout_log": str(stdout_path),
+        "stderr_log": str(stderr_path),
+        "result_json": str(result_path) if result_path.exists() else None,
+        "limit_reason": execution.get("limit_reason"),
+    }
+    if status == "failed" and row["failure_type"] is None:
+        row["failure_type"] = "WorkerFailed"
+    if status == "resource_limited" and row["failure_type"] is None:
+        row["failure_type"] = "ResourceLimitExceeded"
+    return row
+
+
+def _capacity_limit_failure(row: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any] | None:
+    training_limit = _limit_value(limits.get("max_training_seconds_per_run"))
+    if training_limit is not None and row.get("training_seconds") is not None and float(row["training_seconds"]) > training_limit:
+        return {
+            "status": "resource_limited",
+            "failure_stage": "treinamento",
+            "failure_type": "ResourceLimitExceeded",
+            "limit_reason": f"training_seconds={float(row['training_seconds']):.3f} exceeded limit {training_limit:.3f}",
+        }
+    return None
+
+
+def _capacity_skipped_row(
+    benchmark_id: str,
+    model: str,
+    seed: int,
+    train_size: int,
+    holdout_size: int,
+    calibration_rows: int,
+    failed_train_size: int,
+) -> dict[str, Any]:
+    return {
+        "benchmark_id": benchmark_id,
+        "model": model,
+        "seed": int(seed),
+        "train_size": int(train_size),
+        "holdout_size": int(holdout_size),
+        "calibration_rows": int(calibration_rows),
+        "status": "skipped_after_failure",
+        "quality_status": None,
+        "run_id": None,
+        "failure_stage": "progression",
+        "failure_type": f"Skipped after failure at train_size={failed_train_size}",
+        "exit_code": None,
+        "duration_seconds": 0.0,
+        "training_seconds": None,
+        "generation_seconds": None,
+        "validation_seconds": None,
+        "evaluation_seconds": None,
+        "export_seconds": None,
+        "memory_initial_mb": None,
+        "peak_memory_mb": None,
+        "memory_incremental_mb": None,
+        "model_size_mb": None,
+        "artifact_size_mb": None,
+        "backend_warmup_seconds": None,
+        "batches_per_epoch": None,
+        "generator_updates": None,
+        "discriminator_updates": None,
+        "mean_epoch_seconds": None,
+        "ctgan_batches_per_epoch_inferred": None,
+        "ctgan_total_batches_inferred": None,
+        "backend": model,
+        "cpu_count": os.cpu_count(),
+        "gpu": None,
+        "library_versions": None,
+        "stdout_log": None,
+        "stderr_log": None,
+        "result_json": None,
+        "limit_reason": None,
+    }
+
+
+def _capacity_failure_from_row(row: dict[str, Any], stage: str, error_type: str, message: str) -> dict[str, Any]:
+    return {
+        "model": row["model"],
+        "seed": int(row["seed"]),
+        "train_size": row.get("train_size"),
+        "holdout_size": row.get("holdout_size"),
+        "stage": stage,
+        "status": row["status"],
+        "error_type": error_type,
+        "message": message,
+        "exit_code": row.get("exit_code"),
+        "stdout_log": row.get("stdout_log"),
+        "stderr_log": row.get("stderr_log"),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _capacity_run_reference(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "benchmark_id": row["benchmark_id"],
+        "model": row["model"],
+        "seed": int(row["seed"]),
+        "train_size": row.get("train_size"),
+        "holdout_size": row.get("holdout_size"),
+        "status": row["status"],
+        "quality_status": row.get("quality_status"),
+        "run_id": row.get("run_id"),
+        "stdout_log": row.get("stdout_log"),
+        "stderr_log": row.get("stderr_log"),
+        "result_json": row.get("result_json"),
+    }
+
+
+def calculate_capacity_limits(rows: list[dict[str, Any]], models: list[str], train_sizes: list[int]) -> list[dict[str, Any]]:
+    """Calculate observed capacity limits by model without claiming absolute limits."""
+    sorted_sizes = sorted(int(size) for size in train_sizes)
+    payload: list[dict[str, Any]] = []
+    for model in models:
+        model_rows = [row for row in rows if row["model"] == model]
+        completed = sorted(set(
+            int(row["train_size"])
+            for row in model_rows
+            if row["status"] in CAPACITY_COMPLETED_STATUSES
+        ))
+        non_completed = sorted(
+            (int(row["train_size"]), row["status"])
+            for row in model_rows
+            if row["status"] not in CAPACITY_COMPLETED_STATUSES and row["status"] != "skipped_after_failure"
+        )
+        skipped = sorted(set(
+            int(row["train_size"])
+            for row in model_rows
+            if row["status"] == "skipped_after_failure"
+        ))
+        first_failed_size = non_completed[0][0] if non_completed else None
+        first_failure_type = non_completed[0][1] if non_completed else None
+        largest = max(completed) if completed else None
+        if largest is None:
+            conclusion = "Nenhum tamanho foi concluído com sucesso neste ambiente."
+        elif first_failed_size is None:
+            conclusion = (
+                f"O modelo foi executado com sucesso com pelo menos {largest:,} registros neste ambiente. "
+                "O limite máximo não foi determinado."
+            ).replace(",", ".")
+        else:
+            conclusion = (
+                f"O modelo foi executado com sucesso com até {largest:,} registros neste ambiente. "
+                f"O limite observado está entre {largest:,} e {first_failed_size:,} registros."
+            ).replace(",", ".")
+        payload.append(
+            {
+                "model": model,
+                "tested_train_sizes": sorted(set(int(row["train_size"]) for row in model_rows if row["status"] != "skipped_after_failure")),
+                "completed_train_sizes": completed,
+                "largest_tested_successful_size": largest,
+                "first_failed_size": first_failed_size,
+                "first_failure_type": first_failure_type,
+                "untested_larger_sizes": skipped,
+                "configured_train_sizes": sorted_sizes,
+                "conclusion": conclusion,
+            }
+        )
+    return payload
+
+
+def _write_capacity_outputs(
+    benchmark_dir: Path,
+    config: ConfigDict,
+    benchmark_id: str,
+    started_at: datetime,
+    ended_at: datetime,
+    duration_seconds: float,
+    rows: list[dict[str, Any]],
+    failures: list[dict[str, Any]],
+    run_references: list[dict[str, Any]],
+) -> dict[str, Path]:
+    outputs: dict[str, Path] = {}
+    frame = pd.DataFrame(rows, columns=[*CAPACITY_RESULT_COLUMNS, "calibration_seconds", "split_seconds", "limit_reason"])
+    export_csv = bool(config["outputs"].get("export_csv", True))
+    export_parquet = bool(config["outputs"].get("export_parquet", True))
+    export_json = bool(config["outputs"].get("export_json", True))
+    if export_parquet:
+        outputs["capacity_results_parquet"] = benchmark_dir / "capacity_results.parquet"
+        frame.to_parquet(outputs["capacity_results_parquet"], index=False)
+    if export_csv:
+        outputs["capacity_results_csv"] = benchmark_dir / "capacity_results.csv"
+        frame.to_csv(outputs["capacity_results_csv"], index=False)
+
+    capacity_limits = calculate_capacity_limits(rows, config["benchmark"]["models"], config["benchmark"].get("train_sizes", []))
+    summary = {
+        "benchmark_id": benchmark_id,
+        "status": "completed" if not failures else "completed_with_failures" if rows else "failed",
+        "expected_runs": len(benchmark_matrix(config)),
+        "completed_runs": sum(1 for row in rows if row["status"] in CAPACITY_COMPLETED_STATUSES),
+        "failed_runs": sum(1 for row in rows if row["status"] not in CAPACITY_COMPLETED_STATUSES),
+        "capacity_limits": capacity_limits,
+        "interpretation": "Operational capacity benchmark; quality gates do not determine technical capacity.",
+    }
+    if export_json:
+        outputs["capacity_summary_json"] = write_json(summary, benchmark_dir / "capacity_summary.json")
+        outputs["failures_json"] = write_json({"failures": failures}, benchmark_dir / "failures.json")
+        outputs["runs_json"] = write_json({"runs": run_references}, benchmark_dir / "runs.json")
+        outputs["scalability_limits_json"] = write_json({"scalability_limits": capacity_limits}, benchmark_dir / "scalability_limits.json")
+
+    manifest = _benchmark_manifest(
+        benchmark_id=benchmark_id,
+        config=config,
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_seconds=duration_seconds,
+        expected_runs=len(benchmark_matrix(config)),
+        completed_runs=summary["completed_runs"],
+        failed_runs=summary["failed_runs"],
+        status=summary["status"],
+        artifact_paths={**outputs, "benchmark_config": benchmark_dir / "benchmark_config.yaml"},
+    )
+    outputs["benchmark_manifest"] = write_json(manifest, benchmark_dir / "benchmark_manifest.json")
+    return outputs
+
+
 def run_benchmark(config: ConfigDict | None = None) -> dict[str, Any]:
     """Run the benchmark and write benchmark-level artifacts."""
     started = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     effective = resolve_benchmark_config(config)
+    if effective["benchmark"].get("type") == "capacity":
+        return run_capacity_benchmark(effective, started_at=started, started_perf=started_perf)
     benchmark_id = build_benchmark_id(str(effective["benchmark"]["name"]), started)
     base_directory = Path(effective["outputs"]["base_directory"])
     benchmark_dir = base_directory / benchmark_id

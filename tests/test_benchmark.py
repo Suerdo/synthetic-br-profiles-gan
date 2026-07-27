@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,15 +17,18 @@ if str(SRC) not in sys.path:
 
 from synthetic_br_profiles_gan.benchmark import (
     DEFAULT_BENCHMARK_CONFIG,
+    _capacity_row_from_worker_payload,
     aggregate_summary_by_model_and_size,
     aggregate_summary_by_model,
     benchmark_matrix,
     build_benchmark_id,
     calculate_marginal_gains,
+    calculate_capacity_limits,
     calculate_scalability_limits,
     holdout_rows_for_train_size,
     resolve_benchmark_config,
     rotate_models_for_seed,
+    run_capacity_subprocess,
     run_benchmark,
 )
 from synthetic_br_profiles_gan.calibration import generate_calibration_dataset, split_train_holdout
@@ -177,6 +181,25 @@ class BenchmarkTest(unittest.TestCase):
             "max_peak_memory_mb": None,
             "stop_larger_sizes_after_resource_failure": True,
         }
+        return config
+
+    def capacity_config(self, root: Path) -> dict:
+        config = self.scaling_config(root)
+        config["benchmark"]["name"] = "capacity-unit"
+        config["benchmark"]["type"] = "capacity"
+        config["benchmark"]["models"] = ["programmatic", "simple_gan", "ctgan"]
+        config["benchmark"]["seeds"] = [41]
+        config["benchmark"]["train_sizes"] = [50000, 100000, 200000]
+        config["benchmark"]["synthetic_rows"] = 20
+        config["benchmark"]["assessment_mode"] = "smoke"
+        config["execution"] = {
+            "parallelism": 1,
+            "warmup_backends": True,
+            "rotate_model_order_by_seed": False,
+            "subprocess_isolation": True,
+            "subprocess_timeout_seconds": None,
+        }
+        config["generation"] = {"batch_size": 32, "max_batches": 2, "date_format": "%Y-%m-%d"}
         return config
 
     def test_config_validation_matrix_and_benchmark_id(self) -> None:
@@ -460,6 +483,174 @@ class BenchmarkTest(unittest.TestCase):
             called_config = fake.call_args.args[0]
             self.assertEqual(called_config["benchmark"]["train_sizes"], [1000, 5000])
             self.assertNotIn("calibration_rows", called_config["benchmark"])
+
+    def test_capacity_config_validation_and_exact_sizes(self) -> None:
+        config = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-capacity.yaml"))
+        self.assertEqual(config["benchmark"]["type"], "capacity")
+        self.assertEqual(holdout_rows_for_train_size(50000, 0.20), 12500)
+        self.assertEqual(holdout_rows_for_train_size(100000, 0.20), 25000)
+        self.assertEqual(holdout_rows_for_train_size(200000, 0.20), 50000)
+        self.assertEqual(len(benchmark_matrix(config)), 9)
+
+    def test_capacity_split_exact_sizes_for_configured_matrix(self) -> None:
+        for train_size, holdout_size in [(50000, 12500), (100000, 25000), (200000, 50000)]:
+            calibration = pd.DataFrame({"row": range(train_size + holdout_size)})
+            train, holdout = split_train_holdout(
+                calibration,
+                holdout_fraction=0.2,
+                seed=41,
+                train_rows=train_size,
+                holdout_rows=holdout_size,
+            )
+            self.assertEqual(train.shape[0], train_size)
+            self.assertEqual(holdout.shape[0], holdout_size)
+
+    def test_capacity_progression_skips_larger_size_after_resource_failure_and_continues_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self.capacity_config(root)
+            calls: list[tuple[str, int]] = []
+
+            def fake_split_paths(df, train, holdout, output_dir, metadata=None):
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                return {"train": output_dir / "train.parquet", "holdout": output_dir / "holdout.parquet", "metadata": output_dir / "metadata.json"}
+
+            def fake_capacity_run(**kwargs):
+                model = kwargs["model"]
+                train_size = kwargs["train_size"]
+                calls.append((model, train_size))
+                status = "resource_limited" if model == "simple_gan" and train_size == 100000 else "completed"
+                return {
+                    "benchmark_id": kwargs["benchmark_id"],
+                    "model": model,
+                    "seed": kwargs["seed"],
+                    "train_size": train_size,
+                    "holdout_size": kwargs["holdout_size"],
+                    "calibration_rows": kwargs["calibration_rows"],
+                    "status": status,
+                    "quality_status": "approved" if status == "completed" else None,
+                    "run_id": f"{model}-{train_size}",
+                    "failure_stage": "resource_monitor" if status == "resource_limited" else None,
+                    "failure_type": "ResourceLimitExceeded" if status == "resource_limited" else None,
+                    "exit_code": -15 if status == "resource_limited" else 0,
+                    "duration_seconds": 1.0,
+                    "training_seconds": 0.1,
+                    "generation_seconds": 0.1,
+                    "validation_seconds": 0.0,
+                    "evaluation_seconds": 0.0,
+                    "export_seconds": 0.0,
+                    "memory_initial_mb": 10.0,
+                    "peak_memory_mb": 20.0,
+                    "memory_incremental_mb": 10.0,
+                    "model_size_mb": 1.0,
+                    "artifact_size_mb": 2.0,
+                    "batches_per_epoch": None,
+                    "generator_updates": None,
+                    "discriminator_updates": None,
+                    "mean_epoch_seconds": None,
+                    "ctgan_batches_per_epoch_inferred": None,
+                    "ctgan_total_batches_inferred": None,
+                    "backend": model,
+                    "cpu_count": 2,
+                    "gpu": "{}",
+                    "library_versions": "{}",
+                    "stdout_log": "stdout.log",
+                    "stderr_log": "stderr.log",
+                    "result_json": "result.json",
+                }
+
+            with patch("synthetic_br_profiles_gan.benchmark.generate_calibration_dataset", return_value=pd.DataFrame({"x": [1]})), patch(
+                "synthetic_br_profiles_gan.benchmark.split_train_holdout",
+                return_value=(pd.DataFrame({"x": [1]}), pd.DataFrame({"x": [2]})),
+            ), patch("synthetic_br_profiles_gan.benchmark.save_calibration_splits", side_effect=fake_split_paths), patch(
+                "synthetic_br_profiles_gan.benchmark._run_capacity_model_subprocess",
+                side_effect=fake_capacity_run,
+            ):
+                result = run_benchmark(config)
+
+            self.assertEqual(result["status"], "completed_with_failures")
+            self.assertIn(("simple_gan", 50000), calls)
+            self.assertIn(("simple_gan", 100000), calls)
+            self.assertNotIn(("simple_gan", 200000), calls)
+            self.assertIn(("programmatic", 200000), calls)
+            self.assertIn(("ctgan", 200000), calls)
+            skipped = [row for row in result["capacity_rows"] if row["status"] == "skipped_after_failure"]
+            self.assertEqual(len(skipped), 1)
+            self.assertEqual(skipped[0]["model"], "simple_gan")
+            self.assertEqual(skipped[0]["train_size"], 200000)
+
+    def test_capacity_limits_report_observed_interval(self) -> None:
+        rows = [
+            {"model": "ctgan", "train_size": 50000, "status": "completed"},
+            {"model": "ctgan", "train_size": 100000, "status": "resource_limited"},
+            {"model": "ctgan", "train_size": 200000, "status": "skipped_after_failure"},
+        ]
+        limits = calculate_capacity_limits(rows, ["ctgan"], [50000, 100000, 200000])
+        self.assertEqual(limits[0]["completed_train_sizes"], [50000])
+        self.assertEqual(limits[0]["largest_tested_successful_size"], 50000)
+        self.assertEqual(limits[0]["first_failed_size"], 100000)
+        self.assertEqual(limits[0]["first_failure_type"], "resource_limited")
+        self.assertEqual(limits[0]["untested_larger_sizes"], [200000])
+        self.assertIn("50.000 e 100.000", limits[0]["conclusion"])
+
+    def test_capacity_subprocess_writes_logs_exit_code_and_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result_path = root / "result.json"
+            stdout_path = root / "stdout.log"
+            stderr_path = root / "stderr.log"
+            script = (
+                "import json, pathlib, sys, time; "
+                "pathlib.Path(sys.argv[1]).write_text(json.dumps({'technical_status':'completed'}), encoding='utf-8'); "
+                "print('worker-ok'); time.sleep(0.2)"
+            )
+            execution = run_capacity_subprocess(
+                [sys.executable, "-c", script, str(result_path)],
+                stdout_path,
+                stderr_path,
+                resource_limits={},
+                poll_interval_seconds=0.02,
+            )
+            self.assertEqual(execution["exit_code"], 0)
+            self.assertTrue(result_path.exists())
+            self.assertIn("worker-ok", stdout_path.read_text(encoding="utf-8"))
+            self.assertIsNotNone(execution["peak_memory_mb"])
+            self.assertIsNotNone(execution["memory_incremental_mb"])
+
+    def test_capacity_subprocess_timeout_is_resource_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            execution = run_capacity_subprocess(
+                [sys.executable, "-c", "import time; time.sleep(2)"],
+                root / "stdout.log",
+                root / "stderr.log",
+                resource_limits={},
+                timeout_seconds=0.1,
+                poll_interval_seconds=0.02,
+            )
+            self.assertTrue(execution["resource_limited"])
+            self.assertTrue(execution["timed_out"])
+            self.assertNotEqual(execution["exit_code"], 0)
+
+    def test_capacity_missing_worker_result_becomes_failed_row(self) -> None:
+        row = _capacity_row_from_worker_payload(
+            benchmark_id="bench",
+            model="ctgan",
+            seed=41,
+            train_size=50000,
+            holdout_size=12500,
+            calibration_rows=62500,
+            calibration_timings={},
+            payload=None,
+            execution={"exit_code": 7, "duration_seconds": 0.1, "memory_initial_mb": 1.0, "peak_memory_mb": 2.0, "memory_incremental_mb": 1.0},
+            stdout_path=Path("stdout.log"),
+            stderr_path=Path("stderr.log"),
+            result_path=Path("result.json"),
+        )
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["failure_type"], "MissingWorkerResult")
+        self.assertEqual(row["exit_code"], 7)
 
     @unittest.skipUnless(os.environ.get("RUN_SLOW_MODEL_TESTS") == "1", "slow optional benchmark test")
     def test_real_three_model_smoke_benchmark(self) -> None:

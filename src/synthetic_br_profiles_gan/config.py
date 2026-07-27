@@ -290,6 +290,7 @@ def validate_benchmark_config(config: ConfigDict) -> None:
         benchmark,
         {
             "name",
+            "type",
             "models",
             "seeds",
             "calibration_rows",
@@ -304,6 +305,8 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     )
     if not isinstance(benchmark.get("name"), str) or not benchmark["name"]:
         raise ConfigurationError("benchmark.name must be a non-empty string.")
+    if benchmark.get("type", "quality") not in {"quality", "capacity"}:
+        raise ConfigurationError("benchmark.type must be quality or capacity.")
     models = benchmark.get("models")
     if not isinstance(models, list) or not models:
         raise ConfigurationError("benchmark.models must be a non-empty list.")
@@ -413,7 +416,11 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     execution = config.get("execution", {})
     if not isinstance(execution, dict):
         raise ConfigurationError("execution must be a mapping when provided.")
-    _reject_unknown(execution, {"parallelism", "warmup_backends", "rotate_model_order_by_seed"}, "execution")
+    _reject_unknown(
+        execution,
+        {"parallelism", "warmup_backends", "rotate_model_order_by_seed", "subprocess_isolation", "subprocess_timeout_seconds"},
+        "execution",
+    )
     if "parallelism" in execution:
         _require_positive_int(execution, "parallelism", "execution")
         if int(execution["parallelism"]) != 1:
@@ -421,6 +428,15 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     for key in ["warmup_backends", "rotate_model_order_by_seed"]:
         if key in execution:
             _require_bool(execution, key, "execution")
+    if "subprocess_isolation" in execution:
+        _require_bool(execution, "subprocess_isolation", "execution")
+    if execution.get("subprocess_timeout_seconds") is not None:
+        try:
+            timeout_seconds = float(execution["subprocess_timeout_seconds"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError("execution.subprocess_timeout_seconds must be positive or null.") from exc
+        if timeout_seconds <= 0:
+            raise ConfigurationError("execution.subprocess_timeout_seconds must be positive or null.")
 
     resource_limits = config.get("resource_limits", {})
     if not isinstance(resource_limits, dict):

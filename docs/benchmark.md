@@ -232,6 +232,90 @@ A CTGAN foi executada com sucesso com até 20.000 registros de treinamento neste
 
 Isso não significa que 20.000 seja o limite máximo da CTGAN.
 
+## Capacidade operacional
+
+O benchmark de capacidade operacional é separado do benchmark de qualidade. Seu objetivo é observar o maior tamanho de conjunto de treinamento executado com sucesso neste ambiente, sem declarar que esse tamanho seja o limite máximo absoluto de qualquer modelo.
+
+As configurações são:
+
+- `configs/benchmark-capacity-smoke.yaml`: validação técnica com 50.000 registros de treinamento, uma época e geração pequena;
+- `configs/benchmark-capacity.yaml`: execução principal com 50.000, 100.000 e 200.000 registros de treinamento, cinco épocas e geração reduzida.
+
+Executar o smoke de capacidade:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-capacity-smoke.yaml
+```
+
+Executar o benchmark principal de capacidade:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-capacity.yaml
+```
+
+Com `holdout_fraction: 0.20`, os tamanhos exatos são:
+
+| Treino | Holdout | Calibração total |
+| ---: | ---: | ---: |
+| 50.000 | 12.500 | 62.500 |
+| 100.000 | 25.000 | 125.000 |
+| 200.000 | 50.000 | 250.000 |
+
+O modo de capacidade usa `benchmark.type: capacity`. Nesse modo, cada combinação de modelo e tamanho é executada em um subprocesso separado. O processo principal cria os splits, inicia o subprocesso com uma lista de argumentos, monitora memória residente, registra `stdout.log`, `stderr.log`, código de saída e lê um `result.json` estruturado.
+
+A memória reportada é a memória residente total observada para o processo do worker e seus filhos. Mesmo com isolamento por subprocesso, a medição continua dependente do sistema operacional e de como TensorFlow, PyTorch e bibliotecas nativas alocam memória.
+
+Quando `execution.warmup_backends` está ativo, o worker carrega minimamente o backend do modelo antes de iniciar o pipeline. Esse tempo é registrado em `backend_warmup_seconds` e não entra em `training_seconds`.
+
+### Progressão por modelo
+
+A progressão é controlada separadamente por modelo. Se um modelo falhar por recurso ou erro técnico em 100.000 registros, 200.000 registros são pulados apenas para esse modelo. Os demais modelos continuam.
+
+Estados técnicos usados nesse benchmark:
+
+- `completed`: treinamento, geração e exportação concluíram com quality gates aprovados;
+- `quality_quarantined`: execução técnica concluída, mas os quality gates deixaram o resultado em quarentena;
+- `quality_rejected`: execução técnica concluída, mas houve falha obrigatória de quality gate;
+- `resource_limited`: limite operacional de tempo ou memória foi excedido;
+- `failed`: exceção técnica ou término inesperado;
+- `skipped_after_failure`: tamanho pulado porque um tamanho anterior daquele modelo falhou;
+- `backend_unavailable`: dependência opcional ausente.
+
+Uma execução em `quality_quarantined` ou `quality_rejected` conta como concluída tecnicamente para capacidade operacional. Quality gates avaliam validade e qualidade, mas não determinam, sozinhos, se o modelo conseguiu operar naquele tamanho.
+
+### Artefatos de capacidade
+
+Os artefatos específicos incluem:
+
+```text
+artifacts/
+  benchmarks/
+    <capacity-benchmark-id>/
+      benchmark_config.yaml
+      benchmark_manifest.json
+      capacity_summary.json
+      capacity_results.parquet
+      capacity_results.csv
+      runs.json
+      failures.json
+      scalability_limits.json
+      subprocesses/
+        <model>/
+          train-50000/
+            run_config.yaml
+            stdout.log
+            stderr.log
+            result.json
+```
+
+`capacity_results.parquet` e `capacity_results.csv` registram tamanho de treinamento, holdout, status técnico, status dos quality gates, duração, memória inicial, pico de memória residente, memória incremental, tamanho do modelo serializado, tamanho dos artefatos, batches e updates quando disponíveis.
+
+`capacity_summary.json` e `scalability_limits.json` registram, por modelo, tamanhos testados, tamanhos concluídos, tamanhos pulados, primeira falha observada e uma conclusão textual restrita ao ambiente atual.
+
+Poucas épocas validam capacidade técnica de execução, não convergência do modelo. Resultados de capacidade dependem de hardware, sistema operacional, versões das bibliotecas, CPU/GPU disponível e carga do ambiente.
+
 ## Estados e falhas
 
 Cada execução individual preserva os estados do pipeline:
