@@ -23,9 +23,12 @@ build/
 dist/
 *.egg-info/
 
-# Arquivos locais e temporarios
+# Variáveis de ambiente
 .env
 .env.*
+!.env.example
+
+# Arquivos locais e temporários
 *.log
 *.tmp
 *.bak
@@ -38,12 +41,19 @@ tests/.tmp/
 Thumbs.db
 desktop.ini
 
-# Saidas geradas localmente
+# Saídas legadas geradas localmente
 dados_sinteticos_realistas.xlsx
 relatorio_execucao.json
 metricas_validacao.json
 notebooks/dados_sinteticos_realistas.xlsx
 notebooks/relatorio_execucao.json
+
+# Saídas geradas pelo pipeline
+artifacts/
+outputs/
+runs/
+
+# Saídas mantidas dentro de data/outputs
 data/outputs/*
 !data/outputs/.gitkeep
 
@@ -54,6 +64,8 @@ data/outputs/*
 *.pickle
 *.csv
 *.xlsx
+
+# Permitir amostras pequenas versionadas
 !data/samples/
 !data/samples/**
 

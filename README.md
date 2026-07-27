@@ -1,29 +1,35 @@
-# Geracao de Perfis Sinteticos Brasileiros
+# Geração de perfis sintéticos brasileiros
 
-Pipeline experimental para gerar e avaliar perfis sinteticos brasileiros sem usar dados pessoais reais, sem consultar bases oficiais e sem validar documentos contra pessoas existentes.
+Pipeline experimental para gerar e avaliar perfis sintéticos brasileiros sem usar dados pessoais reais, sem consultar bases oficiais e sem validar documentos contra pessoas existentes.
 
-O projeto agora compara tres estrategias:
+O projeto compara três estratégias de geração: um baseline programático, uma GAN tabular densa simples preservada do projeto original e uma CTGAN baseada na biblioteca `ctgan`.
 
-- `programmatic`: baseline puramente programatico, baseado em regras probabilisticas controladas.
-- `simple_gan`: baseline neural preservado do projeto original. Ele e uma GAN tabular densa simples em Keras, nao uma CTGAN.
-- `ctgan`: CTGAN real usando a biblioteca standalone `ctgan>=0.12.1,<0.13`.
+## Estratégias de geração
+
+| Modelo | Descrição | Dependência opcional |
+| --- | --- | --- |
+| `programmatic` | Baseline programático baseado em regras probabilísticas controladas | Não |
+| `simple_gan` | GAN tabular densa simples em Keras | `simple-gan` |
+| `ctgan` | CTGAN da biblioteca `ctgan>=0.12.1,<0.13` | `ctgan` |
+
+O modelo `simple_gan` não é uma CTGAN. Ele é mantido como baseline neural legado para comparação experimental.
 
 ## Arquitetura
 
 O pacote separa as responsabilidades principais:
 
-- `calibration.py`: cria base de calibracao sintetica com dependencias semanticas e split treino/holdout.
-- `metadata.py`: schema, tipos, dominios, categorias e dependencias estruturais.
-- `generators/`: contexto de perfil, nomes, datas, telefone e documentos ficticios.
-- `models/`: interface comum `TabularSynthesizer`, baseline programatico, `SimpleTabularGAN` e `CTGANSynthesizer`.
-- `validators/`: validacao estrutural centralizada.
-- `evaluation/`: metricas estatisticas, relacionais, diversidade, privacidade e quality gates.
-- `pipeline.py`: orquestracao reutilizada pela CLI e notebook.
-- `artifacts.py` e `manifest.py`: versionamento, hashes e manifestos de execucao.
+- `calibration.py`: cria a base de calibração sintética com dependências semânticas e divisão entre conjunto de treinamento e conjunto de holdout, isto é, o subconjunto reservado exclusivamente para avaliação.
+- `metadata.py`: define schema, tipos, domínios, categorias e dependências estruturais.
+- `generators/`: contém o contexto de perfil e os geradores de nomes, datas, telefone e documentos fictícios.
+- `models/`: contém a interface comum `TabularSynthesizer`, o baseline programático, `SimpleTabularGAN` e `CTGANSynthesizer`.
+- `validators/`: centraliza a validação estrutural.
+- `evaluation/`: calcula métricas estatísticas, relacionais, de diversidade, de privacidade e quality gates, ou critérios automáticos de aprovação e rejeição.
+- `pipeline.py`: implementa a orquestração reutilizada pela CLI e pelo notebook.
+- `artifacts.py` e `manifest.py`: cuidam do versionamento, dos hashes e dos manifestos de execução.
 
-## Instalacao
+## Instalação
 
-Instalacao principal, sem backends neurais pesados:
+Instalação principal, sem backends neurais pesados:
 
 ```bash
 pip install -e .
@@ -37,23 +43,25 @@ pip install -e ".[ctgan]"
 pip install -e ".[all-models]"
 ```
 
-## Calibracao
+Se um backend opcional não estiver instalado, a CLI retorna um erro controlado com o comando de instalação esperado, por exemplo `pip install -e ".[ctgan]"`.
 
-A base de calibracao e sintetica e controlada. Ela inclui:
+## Calibração
 
-- idade, genero, regiao, estado, municipio, DDD;
-- escolaridade, estado civil, ocupacao, renda e dependentes.
+A base de calibração é sintética e controlada. Ela inclui:
 
-As relacoes sao probabilisticas e reproduziveis por seed:
+- idade, gênero, região, estado, município e DDD;
+- escolaridade, estado civil, ocupação, renda e dependentes.
 
-- estado pertence a regiao;
-- municipio e DDD pertencem ao estado;
-- escolaridade depende de idade;
-- ocupacao depende de idade e escolaridade;
-- renda usa distribuicao assimetrica e depende de idade, escolaridade, ocupacao e regiao;
-- estado civil e dependentes dependem de idade e contexto familiar.
+As relações são probabilísticas e reproduzíveis por seed:
 
-Criar calibracao:
+- estado pertence a uma região;
+- município e DDD pertencem ao estado;
+- escolaridade depende da idade;
+- ocupação depende da idade e da escolaridade;
+- renda usa uma distribuição assimétrica e depende de idade, escolaridade, ocupação e região;
+- estado civil e dependentes dependem da idade e do contexto familiar.
+
+Criar a base de calibração:
 
 ```bash
 python -m synthetic_br_profiles_gan create-calibration \
@@ -61,9 +69,9 @@ python -m synthetic_br_profiles_gan create-calibration \
   --output artifacts/calibration/demo
 ```
 
-## Treino
+## Treinamento
 
-Treinar a GAN densa simples:
+Treinar a GAN tabular densa simples:
 
 ```bash
 python -m synthetic_br_profiles_gan train \
@@ -72,7 +80,7 @@ python -m synthetic_br_profiles_gan train \
   --calibration artifacts/calibration/demo/train.parquet
 ```
 
-Treinar CTGAN real:
+Treinar a CTGAN:
 
 ```bash
 python -m synthetic_br_profiles_gan train \
@@ -81,12 +89,11 @@ python -m synthetic_br_profiles_gan train \
   --calibration artifacts/calibration/demo/train.parquet
 ```
 
-Na CTGAN, colunas categoricas e discretas sao declaradas explicitamente, incluindo `DDD`. Categorias nao sao tratadas como numeros continuos arredondados depois.
-Se um backend opcional nao estiver instalado, a CLI retorna erro controlado com o comando de instalacao esperado, por exemplo `pip install -e ".[ctgan]"`.
+Na CTGAN, colunas categóricas e discretas são declaradas explicitamente, incluindo `DDD`. Categorias não são tratadas como números contínuos para posterior arredondamento.
 
-## Geracao, Validacao e Avaliacao
+## Geração, validação e avaliação
 
-Gerar a partir de um modelo salvo:
+Gerar dados sintéticos a partir de um modelo salvo:
 
 ```bash
 python -m synthetic_br_profiles_gan generate \
@@ -103,7 +110,7 @@ python -m synthetic_br_profiles_gan validate \
   --config configs/pipeline.yaml
 ```
 
-Avaliar contra uma referencia:
+Avaliar contra uma referência:
 
 ```bash
 python -m synthetic_br_profiles_gan evaluate \
@@ -111,7 +118,7 @@ python -m synthetic_br_profiles_gan evaluate \
   --synthetic artifacts/runs/<run_id>/approved/dataset.parquet
 ```
 
-Executar tudo:
+Executar o pipeline completo:
 
 ```bash
 python -m synthetic_br_profiles_gan pipeline \
@@ -119,43 +126,43 @@ python -m synthetic_br_profiles_gan pipeline \
   --config configs/pipeline.yaml
 ```
 
-Use `--require-approved` quando o comando deve retornar codigo diferente de zero se os quality gates nao aprovarem o resultado.
+Use `--require-approved` quando o comando deve retornar código diferente de zero se os quality gates não aprovarem o resultado.
 
-## Metricas
+## Métricas
 
-O relatorio compara sintetico contra treino e holdout separadamente.
+O relatório compara os dados sintéticos separadamente contra o conjunto de treinamento e contra o conjunto de holdout.
 
-Metricas numericas incluem media, mediana, desvio-padrao, min/max, quantis, distancia de Wasserstein absoluta, distancia de Wasserstein normalizada pelo IQR da referencia com fallback para desvio-padrao, KS e diferencas absolutas/relativas.
+Para colunas numéricas, as métricas incluem média, mediana, desvio-padrão, mínimo, máximo, quantis, distância de Wasserstein absoluta, distância de Wasserstein normalizada pelo IQR da referência com fallback para desvio-padrão, KS e diferenças absolutas e relativas.
 
-Metricas categoricas incluem frequencias, diferencas de proporcao, categorias ausentes/inesperadas e distancia de variacao total.
+Para colunas categóricas, as métricas incluem frequências, diferenças de proporção, categorias ausentes, categorias inesperadas e distância de variação total.
 
-Metricas relacionais incluem correlacoes Pearson/Spearman, diferencas entre matrizes, crosstabs de pares relevantes e renda por faixa etaria, escolaridade, regiao e ocupacao.
+As métricas relacionais incluem correlações Pearson/Spearman, diferenças entre matrizes, crosstabs de pares relevantes e renda por faixa etária, escolaridade, região e ocupação.
 
-Indicadores de diversidade e privacidade incluem duplicidade, match exato com treino/holdout, combinacoes unicas, cobertura de categorias, Distance to Closest Record e Nearest Neighbor Distance Ratio. Eles nao provam anonimizacao.
+Os indicadores de diversidade e privacidade incluem duplicidade, match exato com o conjunto de treinamento e com o conjunto de holdout, combinações únicas, cobertura de categorias, Distance to Closest Record e Nearest Neighbor Distance Ratio. Esses indicadores não provam anonimização.
 
-## Quality Gates
+## Quality gates
 
-Os gates configuraveis ficam em `configs/quality_gates.yaml` e no bloco `quality_gates` de `configs/pipeline.yaml`.
+Os quality gates configuráveis ficam em `configs/quality_gates.yaml` e no bloco `quality_gates` de `configs/pipeline.yaml`.
 
-Modos de avaliacao:
+Modos de avaliação:
 
-- `smoke`: verifica caminhos tecnicos com amostras pequenas. Falhas de tamanho minimo deixam o resultado em quarentena, mas nao sao evidencia estatistica.
-- `experimental`: modo padrao para comparacoes exploratorias. Mantem gates obrigatorios e sinaliza gates informativos como quarentena.
-- `approval`: exige amostra minima e rejeita metricas obrigatorias ausentes, invalidas ou `NaN`.
+- `smoke`: verifica caminhos técnicos com amostras pequenas. Falhas de tamanho mínimo deixam o resultado em quarentena, mas não são evidência estatística.
+- `experimental`: modo padrão para comparações exploratórias. Mantém gates obrigatórios e sinaliza gates informativos como quarentena.
+- `approval`: exige amostra mínima e rejeita métricas obrigatórias ausentes, inválidas ou `NaN`.
 
-Gates obrigatorios incluem linhas invalidas, identificadores duplicados, campos obrigatorios nulos e taxa de match exato com treino. Gates informativos padrao incluem distancia de variacao total categorica e diferenca de correlacao. Metricas obrigatorias ausentes ou nao finitas nao aprovam automaticamente a execucao.
+Gates obrigatórios incluem linhas inválidas, identificadores duplicados, campos obrigatórios nulos e taxa de match exato com o conjunto de treinamento. Gates informativos padrão incluem distância de variação total categórica e diferença de correlação. Métricas obrigatórias ausentes ou não finitas não aprovam automaticamente a execução.
 
-Estados possiveis:
+| Estado | Significado |
+| --- | --- |
+| `approved` | Todos os critérios aplicáveis foram atendidos |
+| `quarantined` | Critérios obrigatórios passaram, mas há alertas ou critérios informativos não atendidos |
+| `rejected` | Pelo menos um critério obrigatório falhou |
 
-- `approved`: gates obrigatorios e opcionais passaram.
-- `quarantined`: gates obrigatorios passaram, mas algum gate opcional falhou.
-- `rejected`: gate obrigatorio falhou.
-
-Quando o status nao e aprovado, o dataset e os relatorios finais vao para `quarantine/` em vez de `approved/`. Com `--require-approved`, a CLI retorna codigo diferente de zero para `quarantined` ou `rejected`.
+Quando o status não é aprovado, o dataset e os relatórios finais vão para `quarantine/` em vez de `approved/`. Com `--require-approved`, a CLI retorna código diferente de zero para `quarantined` ou `rejected`.
 
 ## Artefatos
 
-Cada execucao usa `run_id` com timestamp UTC:
+Cada execução usa `run_id` com timestamp UTC:
 
 ```text
 artifacts/
@@ -171,7 +178,7 @@ artifacts/
       config.yaml
 ```
 
-Dentro de `approved/` ou `quarantine/` sao salvos:
+Dentro de `approved/` ou `quarantine/` são salvos:
 
 - `dataset.parquet` como formato principal;
 - `dataset.xlsx` quando habilitado;
@@ -183,17 +190,17 @@ Dentro de `approved/` ou `quarantine/` sao salvos:
 - `metadata.json`;
 - `train.parquet` e `holdout.parquet`.
 
-O manifesto registra run id, timestamp UTC, modelo, seed, quantidades, status, versoes de bibliotecas, plataforma, CPU/GPU quando o backend esta carregado, duracao, hash da configuracao, hashes dos artefatos e commit Git quando disponivel.
+O manifesto registra `run_id`, timestamp UTC, modelo, seed, quantidades, status, versões de bibliotecas, plataforma, CPU/GPU quando o backend está carregado, duração, hash da configuração, hashes dos artefatos e commit Git quando disponível.
 
 ## Reprodutibilidade
 
-A seed e centralizada. O pipeline controla `random`, NumPy e, quando o modelo exige, TensorFlow ou PyTorch/CTGAN. Variaveis como `PYTHONHASHSEED` sao registradas, mas a documentacao do manifesto avisa quando foram alteradas depois do inicio do interpretador.
+A seed é centralizada. O pipeline controla `random`, NumPy e, quando o modelo exige, TensorFlow ou PyTorch/CTGAN. Variáveis como `PYTHONHASHSEED` são registradas, mas a documentação do manifesto avisa quando foram alteradas depois do início do interpretador.
 
-Operacoes neurais podem variar entre CPU, GPU, drivers e versoes de backend. Testes padrao evitam exigir igualdade bit a bit de TensorFlow ou CTGAN.
+Operações neurais podem variar entre CPU, GPU, drivers e versões de backend. Os testes padrão evitam exigir igualdade bit a bit de TensorFlow ou CTGAN.
 
 ## Notebook
 
-O notebook em `notebooks/` importa o pacote e demonstra execucao, amostra, validacao, metricas e comparacao de modelos. Ele nao contem mais uma implementacao paralela do pipeline.
+O notebook em `notebooks/` importa o pacote e demonstra execução, amostra, validação, métricas e comparação de modelos. Ele não contém mais uma implementação paralela do pipeline.
 
 ## Testes
 
@@ -201,19 +208,19 @@ O notebook em `notebooks/` importa o pacote e demonstra execucao, amostra, valid
 python -m unittest discover -s tests
 ```
 
-Os testes cobrem schema, calibracao, relacoes estado/regiao/municipio/DDD, data de nascimento, documentos, validadores, metricas, privacidade, quality gates, run ID, CLI, baseline programatico, reprodutibilidade e pipeline pequeno.
+Os testes cobrem schema, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, reprodutibilidade e pipeline pequeno.
 
-## Limitacoes
+## Limitações
 
-- Documentos matematicamente validos nao sao consultados em bases reais.
-- O projeto nao garante que um numero valido nunca seja atribuido a uma pessoa real.
-- Os dados devem permanecer identificados como sinteticos.
-- Os dados nao devem ser usados para interagir com servicos reais.
-- Metricas de privacidade sao indicadores de risco, nao prova automatica de anonimizacao.
-- A calibracao programatica nao representa perfeitamente a populacao brasileira.
-- Qualidade estatistica nao significa veracidade individual.
-- A GAN antiga e uma GAN tabular densa simples; CTGAN so existe no modelo `ctgan`.
+- Documentos matematicamente válidos não são consultados em bases reais.
+- O projeto não garante que um número válido nunca seja atribuído a uma pessoa real.
+- Os dados devem permanecer identificados como dados sintéticos.
+- Os dados não devem ser usados para interagir com serviços reais.
+- Métricas de privacidade são indicadores de risco, não prova automática de anonimização.
+- A base de calibração programática não representa perfeitamente a população brasileira.
+- Qualidade estatística não significa veracidade individual.
+- A GAN antiga é uma GAN tabular densa simples; CTGAN só existe no modelo `ctgan`.
 
-## Uso Responsavel
+## Uso responsável
 
-Este projeto e destinado a pesquisa, testes, homologacao e experimentacao. Nao use os dados para fraude, falsificacao documental, criacao de contas indevidas, engenharia social, tomada de decisao sobre pessoas ou qualquer interacao com servicos reais.
+Este projeto é destinado a pesquisa, testes, homologação e experimentação. Não use os dados para fraude, falsificação documental, criação de contas indevidas, engenharia social, tomada de decisão sobre pessoas ou qualquer interação com serviços reais.
