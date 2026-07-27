@@ -316,6 +316,92 @@ artifacts/
 
 Poucas épocas validam capacidade técnica de execução, não convergência do modelo. Resultados de capacidade dependem de hardware, sistema operacional, versões das bibliotecas, CPU/GPU disponível e carga do ambiente.
 
+## Fronteira superior de capacidade observada
+
+Esta etapa amplia o benchmark de capacidade operacional para localizar a primeira falha observada dos modelos que concluíram tecnicamente até 200.000 registros de treinamento. O experimento executa apenas `programmatic` e `ctgan`; a `simple_gan` não é executada nesta etapa, porque já possui sucesso observado em 100.000 registros e falha observada em 200.000 registros no experimento anterior.
+
+As configurações são:
+
+- `configs/benchmark-capacity-upper-smoke.yaml`: validação técnica com `programmatic` e `ctgan`, uma seed, 400.000 registros de treinamento e 100 registros sintéticos;
+- `configs/benchmark-capacity-upper.yaml`: execução principal com `programmatic` e `ctgan`, uma seed, tamanhos de 400.000, 800.000 e 1.600.000 registros de treinamento e 1.000 registros sintéticos.
+
+Executar o smoke da fronteira superior:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-capacity-upper-smoke.yaml
+```
+
+Executar o benchmark principal da fronteira superior:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-capacity-upper.yaml
+```
+
+Com `holdout_fraction: 0.20`, os tamanhos exatos são:
+
+| Treino | Holdout | Calibração total |
+| ---: | ---: | ---: |
+| 400.000 | 100.000 | 500.000 |
+| 800.000 | 200.000 | 1.000.000 |
+| 1.600.000 | 400.000 | 2.000.000 |
+
+A progressão permanece independente por modelo. Se a CTGAN falhar em 800.000 registros, 1.600.000 registros serão marcados como `skipped_after_failure` apenas para a CTGAN. O modelo programático continuará a progressão configurada, desde que o tamanho anterior desse modelo tenha sido tecnicamente concluído.
+
+São considerados tecnicamente concluídos os status `completed`, `quality_quarantined` e `quality_rejected`. Os status `resource_limited`, `failed`, `skipped_after_failure` e `backend_unavailable` não contam como conclusão técnica. Uma execução em quarentena ou rejeitada por quality gate pode, portanto, contar como concluída para capacidade operacional.
+
+Os resultados estruturados são gravados em `capacity_summary.json`, `scalability_limits.json`, `capacity_results.csv`, `capacity_results.parquet` e `failures.json`. Cada falha registra, quando disponível, estágio, tipo, mensagem, código de saída, sinal nativo, duração até a falha, memória inicial, pico de RSS, memória incremental, caminhos de `stdout.log` e `stderr.log`, disponibilidade de `result.json`, último evento registrado pelo worker, sistema operacional, versão do Python, versão do backend, CPU e GPU.
+
+Os resultados representam a capacidade observada no ambiente testado. O maior tamanho concluído não deve ser interpretado como limite máximo absoluto do modelo; o limite máximo absoluto não foi determinado.
+
+### Registro de falhas observadas
+
+Execução documentada:
+
+- `benchmark_id`: `capacity-upper-bound-20260727T220738Z-32ffebd0`;
+- sistema operacional: Windows 11 (`Windows-11-10.0.26200-SP0`);
+- Python: `3.13.13`;
+- CTGAN: `0.12.1`;
+- TensorFlow: `2.21.0`;
+- PyTorch: `2.13.0`;
+- CPU lógica reportada: `32`;
+- GPU CUDA reportada pelo worker da CTGAN: indisponível;
+- status geral: `completed`;
+- execuções esperadas: `6`;
+- execuções concluídas tecnicamente: `6`;
+- falhas registradas em `failures.json`: `0`.
+
+| Modelo | Treino | Holdout | Status técnico | Status de qualidade | Tempo de treino | Duração total | Pico de RSS | Tamanho do modelo |
+| --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
+| `programmatic` | 400.000 | 100.000 | `completed` | `approved` | 0,030 s | 5,998 s | 3.501,5 MiB | 0,01 MiB |
+| `ctgan` | 400.000 | 100.000 | `quality_quarantined` | `quarantined` | 99,801 s | 106,756 s | 8.343,9 MiB | 26,28 MiB |
+| `programmatic` | 800.000 | 200.000 | `completed` | `approved` | 0,055 s | 9,319 s | 3.773,6 MiB | 0,01 MiB |
+| `ctgan` | 800.000 | 200.000 | `completed` | `approved` | 201,622 s | 211,657 s | 9.587,8 MiB | 50,69 MiB |
+| `programmatic` | 1.600.000 | 400.000 | `completed` | `approved` | 0,112 s | 16,460 s | 4.035,4 MiB | 0,01 MiB |
+| `ctgan` | 1.600.000 | 400.000 | `completed` | `approved` | 408,202 s | 425,602 s | 14.607,5 MiB | 99,52 MiB |
+
+#### ProgrammaticSynthesizer
+
+- Maior tamanho concluído: 1.600.000 registros de treinamento.
+- Primeira falha observada: não observada nesta execução.
+- Tamanhos pulados: nenhum.
+- Status dos quality gates: `approved` em todos os tamanhos.
+- Interpretação: o modelo programático foi executado com sucesso com pelo menos 1.600.000 registros neste ambiente. O limite máximo absoluto não foi determinado.
+- Intervalo operacional observado: limite inferior observado de 1.600.000 registros; limite superior não determinado.
+
+#### CTGANSynthesizer
+
+- Maior tamanho concluído: 1.600.000 registros de treinamento.
+- Primeira falha observada: não observada nesta execução.
+- Tamanhos pulados: nenhum.
+- Status dos quality gates: `quality_quarantined` em 400.000 registros e `completed` com qualidade `approved` em 800.000 e 1.600.000 registros.
+- Evidências: `result.json` foi produzido para todos os tamanhos, `exit_code` foi `0` em todos os subprocessos e `failures.json` não registrou falhas.
+- Interpretação: a CTGAN foi executada com sucesso com pelo menos 1.600.000 registros neste ambiente. O limite máximo absoluto não foi determinado.
+- Intervalo operacional observado: limite inferior observado de 1.600.000 registros; limite superior não determinado.
+
+Como não houve primeira falha observada para `programmatic` nem para `ctgan`, ainda não existe intervalo fechado para uma busca intermediária. Para localizar a primeira falha em uma nova etapa, o próximo patamar operacional recomendado é 3.200.000 registros de treinamento, mantendo a mesma cautela metodológica e sem executar esse tamanho automaticamente.
+
 ## Estados e falhas
 
 Cada execução individual preserva os estados do pipeline:

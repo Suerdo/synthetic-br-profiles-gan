@@ -17,6 +17,7 @@ if str(SRC) not in sys.path:
 
 from synthetic_br_profiles_gan.benchmark import (
     DEFAULT_BENCHMARK_CONFIG,
+    _capacity_failure_from_row,
     _capacity_row_from_worker_payload,
     _terminate_process_tree,
     aggregate_summary_by_model_and_size,
@@ -201,6 +202,15 @@ class BenchmarkTest(unittest.TestCase):
             "subprocess_timeout_seconds": None,
         }
         config["generation"] = {"batch_size": 32, "max_batches": 2, "date_format": "%Y-%m-%d"}
+        return config
+
+    def capacity_upper_config(self, root: Path) -> dict:
+        config = self.capacity_config(root)
+        config["benchmark"]["name"] = "capacity-upper-unit"
+        config["benchmark"]["models"] = ["programmatic", "ctgan"]
+        config["benchmark"]["train_sizes"] = [400000, 800000, 1600000]
+        config["benchmark"]["synthetic_rows"] = 20
+        config["models"]["ctgan"] = {"epochs": 1, "batch_size": 500, "verbose": False, "enable_gpu": False, "cuda": None}
         return config
 
     def test_config_validation_matrix_and_benchmark_id(self) -> None:
@@ -493,6 +503,27 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(holdout_rows_for_train_size(200000, 0.20), 50000)
         self.assertEqual(len(benchmark_matrix(config)), 9)
 
+    def test_capacity_upper_configs_validate_models_and_exact_sizes(self) -> None:
+        smoke = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-capacity-upper-smoke.yaml"))
+        self.assertEqual(smoke["benchmark"]["models"], ["programmatic", "ctgan"])
+        self.assertNotIn("simple_gan", smoke["benchmark"]["models"])
+        self.assertEqual(smoke["benchmark"]["train_sizes"], [400000])
+        self.assertEqual(smoke["benchmark"]["synthetic_rows"], 100)
+        self.assertEqual(len(benchmark_matrix(smoke)), 2)
+
+        config = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-capacity-upper.yaml"))
+        self.assertEqual(config["benchmark"]["type"], "capacity")
+        self.assertEqual(config["benchmark"]["models"], ["programmatic", "ctgan"])
+        self.assertNotIn("simple_gan", config["benchmark"]["models"])
+        self.assertEqual(holdout_rows_for_train_size(400000, 0.20), 100000)
+        self.assertEqual(holdout_rows_for_train_size(800000, 0.20), 200000)
+        self.assertEqual(holdout_rows_for_train_size(1600000, 0.20), 400000)
+        self.assertEqual(len(benchmark_matrix(config)), 6)
+        self.assertIn(
+            {"model": "ctgan", "seed": 41, "train_size": 1600000, "holdout_size": 400000, "calibration_rows": 2000000},
+            benchmark_matrix(config),
+        )
+
     def test_capacity_split_exact_sizes_for_configured_matrix(self) -> None:
         for train_size, holdout_size in [(50000, 12500), (100000, 25000), (200000, 50000)]:
             calibration = pd.DataFrame({"row": range(train_size + holdout_size)})
@@ -581,6 +612,79 @@ class BenchmarkTest(unittest.TestCase):
             self.assertEqual(skipped[0]["model"], "simple_gan")
             self.assertEqual(skipped[0]["train_size"], 200000)
 
+    def test_capacity_upper_progression_stops_only_failed_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self.capacity_upper_config(root)
+            calls: list[tuple[str, int]] = []
+
+            def fake_split_paths(df, train, holdout, output_dir, metadata=None):
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                return {"train": output_dir / "train.parquet", "holdout": output_dir / "holdout.parquet", "metadata": output_dir / "metadata.json"}
+
+            def fake_capacity_run(**kwargs):
+                model = kwargs["model"]
+                train_size = kwargs["train_size"]
+                calls.append((model, train_size))
+                status = "failed" if model == "ctgan" and train_size == 800000 else "completed"
+                return {
+                    "benchmark_id": kwargs["benchmark_id"],
+                    "model": model,
+                    "seed": kwargs["seed"],
+                    "train_size": train_size,
+                    "holdout_size": kwargs["holdout_size"],
+                    "calibration_rows": kwargs["calibration_rows"],
+                    "status": status,
+                    "quality_status": "approved" if status == "completed" else None,
+                    "run_id": f"{model}-{train_size}" if status == "completed" else None,
+                    "failure_stage": "treinamento" if status == "failed" else None,
+                    "failure_type": "RuntimeError" if status == "failed" else None,
+                    "failure_message": "falha sintética",
+                    "exit_code": 4 if status == "failed" else 0,
+                    "exit_signal": None,
+                    "duration_seconds": 1.0,
+                    "memory_initial_mb": 10.0,
+                    "peak_memory_mb": 20.0,
+                    "memory_incremental_mb": 10.0,
+                    "backend": model,
+                    "cpu_count": 2,
+                    "gpu": "{}",
+                    "library_versions": "{}",
+                    "python_version": sys.version,
+                    "platform": sys.platform,
+                    "backend_version": None,
+                    "stdout_log": "stdout.log",
+                    "stderr_log": "stderr.log",
+                    "result_json": None,
+                    "result_json_available": False,
+                    "last_worker_event": None,
+                }
+
+            with patch("synthetic_br_profiles_gan.benchmark.generate_calibration_dataset", return_value=pd.DataFrame({"x": [1]})), patch(
+                "synthetic_br_profiles_gan.benchmark.split_train_holdout",
+                return_value=(pd.DataFrame({"x": [1]}), pd.DataFrame({"x": [2]})),
+            ), patch("synthetic_br_profiles_gan.benchmark.save_calibration_splits", side_effect=fake_split_paths), patch(
+                "synthetic_br_profiles_gan.benchmark._run_capacity_model_subprocess",
+                side_effect=fake_capacity_run,
+            ):
+                result = run_benchmark(config)
+
+            self.assertEqual(result["expected_runs"], 6)
+            self.assertIn(("ctgan", 400000), calls)
+            self.assertIn(("ctgan", 800000), calls)
+            self.assertNotIn(("ctgan", 1600000), calls)
+            self.assertIn(("programmatic", 1600000), calls)
+            skipped = [row for row in result["capacity_rows"] if row["status"] == "skipped_after_failure"]
+            self.assertEqual(len(skipped), 1)
+            self.assertEqual(skipped[0]["model"], "ctgan")
+            self.assertEqual(skipped[0]["train_size"], 1600000)
+            ctgan_limit = next(item for item in result["capacity_summary"] if item["model"] == "ctgan")
+            self.assertEqual(ctgan_limit["largest_tested_successful_size"], 400000)
+            self.assertEqual(ctgan_limit["first_failed_size"], 800000)
+            self.assertEqual(ctgan_limit["first_failure_status"], "failed")
+            self.assertEqual(ctgan_limit["skipped_train_sizes"], [1600000])
+
     def test_capacity_limits_report_observed_interval(self) -> None:
         rows = [
             {"model": "ctgan", "train_size": 50000, "status": "completed"},
@@ -591,9 +695,28 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(limits[0]["completed_train_sizes"], [50000])
         self.assertEqual(limits[0]["largest_tested_successful_size"], 50000)
         self.assertEqual(limits[0]["first_failed_size"], 100000)
+        self.assertEqual(limits[0]["first_failure_status"], "resource_limited")
         self.assertEqual(limits[0]["first_failure_type"], "resource_limited")
+        self.assertEqual(limits[0]["skipped_train_sizes"], [200000])
         self.assertEqual(limits[0]["untested_larger_sizes"], [200000])
-        self.assertIn("50.000 e 100.000", limits[0]["conclusion"])
+        self.assertEqual(limits[0]["observed_interval_lower"], 50000)
+        self.assertEqual(limits[0]["observed_interval_upper"], 100000)
+        self.assertIn("primeira falha", limits[0]["conclusion"])
+
+    def test_capacity_limits_report_no_absolute_limit_when_all_sizes_complete(self) -> None:
+        rows = [
+            {"model": "programmatic", "train_size": 400000, "status": "completed"},
+            {"model": "programmatic", "train_size": 800000, "status": "quality_quarantined"},
+            {"model": "programmatic", "train_size": 1600000, "status": "quality_rejected"},
+        ]
+        limits = calculate_capacity_limits(rows, ["programmatic"], [400000, 800000, 1600000])
+        self.assertEqual(limits[0]["completed_train_sizes"], [400000, 800000, 1600000])
+        self.assertEqual(limits[0]["largest_tested_successful_size"], 1600000)
+        self.assertIsNone(limits[0]["first_failed_size"])
+        self.assertEqual(limits[0]["observed_interval_lower"], 1600000)
+        self.assertIsNone(limits[0]["observed_interval_upper"])
+        self.assertIn("pelo menos 1.600.000", limits[0]["conclusion"])
+        self.assertIn("limite máximo absoluto não foi determinado", limits[0]["conclusion"])
 
     def test_capacity_subprocess_writes_logs_exit_code_and_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -702,6 +825,52 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(row["status"], "failed")
         self.assertEqual(row["failure_type"], "MissingWorkerResult")
         self.assertEqual(row["exit_code"], 7)
+
+    def test_capacity_missing_result_records_cautious_failure_details(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            row = _capacity_row_from_worker_payload(
+                benchmark_id="bench",
+                model="ctgan",
+                seed=41,
+                train_size=800000,
+                holdout_size=200000,
+                calibration_rows=1000000,
+                calibration_timings={},
+                payload=None,
+                execution={
+                    "exit_code": -9,
+                    "duration_seconds": 3.0,
+                    "memory_initial_mb": 100.0,
+                    "peak_memory_mb": 250.0,
+                    "memory_incremental_mb": 150.0,
+                },
+                stdout_path=root / "stdout.log",
+                stderr_path=root / "stderr.log",
+                result_path=root / "result.json",
+            )
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["exit_signal"], 9)
+        self.assertFalse(row["result_json_available"])
+        self.assertIn("não permitem determinar com segurança a causa raiz", row["failure_message"])
+
+        failure = _capacity_failure_from_row(row, row["failure_stage"], row["failure_type"], row["status"])
+        self.assertEqual(failure["model"], "ctgan")
+        self.assertEqual(failure["train_size"], 800000)
+        self.assertEqual(failure["holdout_size"], 200000)
+        self.assertEqual(failure["calibration_rows"], 1000000)
+        self.assertEqual(failure["exit_code"], -9)
+        self.assertEqual(failure["exit_signal"], 9)
+        self.assertFalse(failure["result_json_available"])
+        self.assertIn("não permitem determinar com segurança a causa raiz", failure["failure_message"])
+
+    def test_benchmark_documentation_describes_capacity_upper_bound(self) -> None:
+        document = (ROOT / "docs" / "benchmark.md").read_text(encoding="utf-8")
+        self.assertIn("## Fronteira superior de capacidade observada", document)
+        self.assertIn("configs/benchmark-capacity-upper.yaml", document)
+        self.assertIn("`completed`", document)
+        self.assertIn("`skipped_after_failure`", document)
+        self.assertIn("limite máximo absoluto não foi determinado", document)
 
     @unittest.skipUnless(os.environ.get("RUN_SLOW_MODEL_TESTS") == "1", "slow optional benchmark test")
     def test_real_three_model_smoke_benchmark(self) -> None:

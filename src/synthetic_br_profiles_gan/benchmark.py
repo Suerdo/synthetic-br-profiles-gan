@@ -208,7 +208,9 @@ CAPACITY_RESULT_COLUMNS = [
     "run_id",
     "failure_stage",
     "failure_type",
+    "failure_message",
     "exit_code",
+    "exit_signal",
     "duration_seconds",
     "training_seconds",
     "generation_seconds",
@@ -231,9 +233,15 @@ CAPACITY_RESULT_COLUMNS = [
     "cpu_count",
     "gpu",
     "library_versions",
+    "python_version",
+    "platform",
+    "backend_version",
     "stdout_log",
     "stderr_log",
     "result_json",
+    "result_json_available",
+    "last_worker_event",
+    "timestamp_utc",
 ]
 CAPACITY_COMPLETED_STATUSES = {"completed", "quality_quarantined", "quality_rejected"}
 
@@ -426,8 +434,24 @@ def run_capacity_benchmark(
                 split_dir = _calibration_output_dir(benchmark_dir, seed, train_size)
                 split_paths = save_calibration_splits(calibration, train, holdout, split_dir, metadata=metadata)
             except Exception as exc:
-                failure = _record_failure(benchmark_dir, "all", seed, "calibration", exc, train_size=train_size, holdout_size=holdout_size)
-                failures.append(failure)
+                _record_failure(benchmark_dir, "all", seed, "calibration", exc, train_size=train_size, holdout_size=holdout_size)
+                for model in active_models:
+                    row = _capacity_error_row(
+                        benchmark_id=benchmark_id,
+                        model=model,
+                        seed=seed,
+                        train_size=train_size,
+                        holdout_size=holdout_size,
+                        calibration_rows=calibration_rows,
+                        failure_stage="calibration",
+                        failure_type=type(exc).__name__,
+                        message=str(exc),
+                    )
+                    rows.append(row)
+                    failures.append(_capacity_failure_from_row(row, "calibration", type(exc).__name__, str(exc)))
+                    run_references.append(_capacity_run_reference(row))
+                    if bool(config.get("resource_limits", {}).get("stop_larger_sizes_after_resource_failure", True)):
+                        stop_after_failure.setdefault(model, train_size)
                 if not continue_on_error:
                     raise
                 continue
@@ -737,6 +761,7 @@ def _capacity_row_from_worker_payload(
     stderr_path: Path,
     result_path: Path,
 ) -> dict[str, Any]:
+    result_json_available = result_path.exists()
     if execution.get("resource_limited"):
         status = "resource_limited"
         failure_stage = "resource_monitor"
@@ -754,9 +779,12 @@ def _capacity_row_from_worker_payload(
         quality_status = payload.get("quality_status")
 
     stage = payload.get("stage_durations", {}) if payload else {}
-    env = payload.get("environment", {}) if payload else {}
+    env = payload.get("environment", {}) if payload else environment_info()
     versions = env.get("library_versions", {}) if isinstance(env, dict) else {}
     gpu = env.get("gpu", {}) if isinstance(env, dict) else {}
+    exit_code = execution.get("exit_code")
+    exit_signal = -int(exit_code) if isinstance(exit_code, int) and exit_code < 0 else None
+    failure_message = _capacity_failure_message(payload, execution, result_json_available)
     row = {
         "benchmark_id": benchmark_id,
         "model": model,
@@ -769,7 +797,9 @@ def _capacity_row_from_worker_payload(
         "run_id": payload.get("run_id") if payload else None,
         "failure_stage": failure_stage,
         "failure_type": failure_type,
-        "exit_code": execution.get("exit_code"),
+        "failure_message": failure_message,
+        "exit_code": exit_code,
+        "exit_signal": exit_signal,
         "duration_seconds": payload.get("duration_seconds") if payload and payload.get("duration_seconds") is not None else execution.get("duration_seconds"),
         "calibration_seconds": calibration_timings.get("calibration_seconds"),
         "split_seconds": calibration_timings.get("split_seconds"),
@@ -794,9 +824,15 @@ def _capacity_row_from_worker_payload(
         "cpu_count": os.cpu_count(),
         "gpu": json.dumps(gpu, ensure_ascii=False, sort_keys=True, default=str),
         "library_versions": json.dumps(versions, ensure_ascii=False, sort_keys=True, default=str),
+        "python_version": env.get("python_version") if isinstance(env, dict) else None,
+        "platform": env.get("platform") if isinstance(env, dict) else None,
+        "backend_version": _backend_version(model, versions),
         "stdout_log": str(stdout_path),
         "stderr_log": str(stderr_path),
-        "result_json": str(result_path) if result_path.exists() else None,
+        "result_json": str(result_path) if result_json_available else None,
+        "result_json_available": bool(result_json_available),
+        "last_worker_event": _last_worker_event(stdout_path, stderr_path),
+        "timestamp_utc": payload.get("timestamp_utc") if payload else datetime.now(timezone.utc).isoformat(),
         "limit_reason": execution.get("limit_reason"),
     }
     if status == "failed" and row["failure_type"] is None:
@@ -804,6 +840,40 @@ def _capacity_row_from_worker_payload(
     if status == "resource_limited" and row["failure_type"] is None:
         row["failure_type"] = "ResourceLimitExceeded"
     return row
+
+
+def _capacity_failure_message(payload: dict[str, Any] | None, execution: dict[str, Any], result_json_available: bool) -> str | None:
+    if payload and payload.get("message"):
+        return str(payload["message"])
+    if execution.get("limit_reason"):
+        return str(execution["limit_reason"])
+    if not result_json_available:
+        return (
+            "O subprocesso foi encerrado antes de produzir result.json. "
+            "Os registros disponíveis não permitem determinar com segurança a causa raiz."
+        )
+    return None
+
+
+def _backend_version(model: str, versions: dict[str, Any]) -> str | None:
+    if not isinstance(versions, dict):
+        return None
+    if model == "ctgan":
+        return versions.get("ctgan")
+    if model == "simple_gan":
+        return versions.get("tensorflow")
+    return None
+
+
+def _last_worker_event(stdout_path: Path, stderr_path: Path) -> str | None:
+    for path in (stderr_path, stdout_path):
+        try:
+            lines = [line.strip() for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+        except OSError:
+            continue
+        if lines:
+            return lines[-1]
+    return None
 
 
 def _capacity_limit_failure(row: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any] | None:
@@ -839,7 +909,9 @@ def _capacity_skipped_row(
         "run_id": None,
         "failure_stage": "progression",
         "failure_type": f"Skipped after failure at train_size={failed_train_size}",
+        "failure_message": f"Tamanho pulado porque houve falha anterior em train_size={failed_train_size}.",
         "exit_code": None,
+        "exit_signal": None,
         "duration_seconds": 0.0,
         "training_seconds": None,
         "generation_seconds": None,
@@ -862,9 +934,76 @@ def _capacity_skipped_row(
         "cpu_count": os.cpu_count(),
         "gpu": None,
         "library_versions": None,
+        "python_version": sys.version,
+        "platform": sys.platform,
+        "backend_version": None,
         "stdout_log": None,
         "stderr_log": None,
         "result_json": None,
+        "result_json_available": False,
+        "last_worker_event": None,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "limit_reason": None,
+    }
+
+
+def _capacity_error_row(
+    benchmark_id: str,
+    model: str,
+    seed: int,
+    train_size: int,
+    holdout_size: int,
+    calibration_rows: int,
+    failure_stage: str,
+    failure_type: str,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "benchmark_id": benchmark_id,
+        "model": model,
+        "seed": int(seed),
+        "train_size": int(train_size),
+        "holdout_size": int(holdout_size),
+        "calibration_rows": int(calibration_rows),
+        "status": "failed",
+        "quality_status": None,
+        "run_id": None,
+        "failure_stage": failure_stage,
+        "failure_type": failure_type,
+        "failure_message": message,
+        "exit_code": None,
+        "exit_signal": None,
+        "duration_seconds": 0.0,
+        "training_seconds": None,
+        "generation_seconds": None,
+        "validation_seconds": None,
+        "evaluation_seconds": None,
+        "export_seconds": None,
+        "memory_initial_mb": None,
+        "peak_memory_mb": None,
+        "memory_incremental_mb": None,
+        "model_size_mb": None,
+        "artifact_size_mb": None,
+        "backend_warmup_seconds": None,
+        "batches_per_epoch": None,
+        "generator_updates": None,
+        "discriminator_updates": None,
+        "mean_epoch_seconds": None,
+        "ctgan_batches_per_epoch_inferred": None,
+        "ctgan_total_batches_inferred": None,
+        "backend": model,
+        "cpu_count": os.cpu_count(),
+        "gpu": None,
+        "library_versions": None,
+        "python_version": sys.version,
+        "platform": sys.platform,
+        "backend_version": None,
+        "stdout_log": None,
+        "stderr_log": None,
+        "result_json": None,
+        "result_json_available": False,
+        "last_worker_event": None,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "limit_reason": None,
     }
 
@@ -875,13 +1014,33 @@ def _capacity_failure_from_row(row: dict[str, Any], stage: str, error_type: str,
         "seed": int(row["seed"]),
         "train_size": row.get("train_size"),
         "holdout_size": row.get("holdout_size"),
+        "calibration_rows": row.get("calibration_rows"),
         "stage": stage,
+        "failure_stage": row.get("failure_stage") or stage,
         "status": row["status"],
         "error_type": error_type,
+        "failure_type": row.get("failure_type") or error_type,
         "message": message,
+        "failure_message": row.get("failure_message") or message,
         "exit_code": row.get("exit_code"),
+        "exit_signal": row.get("exit_signal"),
+        "duration_seconds": row.get("duration_seconds"),
+        "memory_initial_mb": row.get("memory_initial_mb"),
+        "peak_memory_mb": row.get("peak_memory_mb"),
+        "memory_incremental_mb": row.get("memory_incremental_mb"),
         "stdout_log": row.get("stdout_log"),
         "stderr_log": row.get("stderr_log"),
+        "result_json": row.get("result_json"),
+        "result_json_available": bool(row.get("result_json_available")),
+        "last_worker_event": row.get("last_worker_event"),
+        "python_version": row.get("python_version"),
+        "platform": row.get("platform"),
+        "backend": row.get("backend"),
+        "backend_version": row.get("backend_version"),
+        "cpu_count": row.get("cpu_count"),
+        "gpu": row.get("gpu"),
+        "library_versions": row.get("library_versions"),
+        "limit_reason": row.get("limit_reason"),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -907,47 +1066,62 @@ def calculate_capacity_limits(rows: list[dict[str, Any]], models: list[str], tra
     sorted_sizes = sorted(int(size) for size in train_sizes)
     payload: list[dict[str, Any]] = []
     for model in models:
-        model_rows = [row for row in rows if row["model"] == model]
-        completed = sorted(set(
-            int(row["train_size"])
-            for row in model_rows
-            if row["status"] in CAPACITY_COMPLETED_STATUSES
-        ))
-        non_completed = sorted(
-            (int(row["train_size"]), row["status"])
-            for row in model_rows
-            if row["status"] not in CAPACITY_COMPLETED_STATUSES and row["status"] != "skipped_after_failure"
+        model_rows = [row for row in rows if row["model"] == model and row.get("train_size") is not None]
+        completed = sorted(
+            set(
+                int(row["train_size"])
+                for row in model_rows
+                if row["status"] in CAPACITY_COMPLETED_STATUSES
+            )
         )
-        skipped = sorted(set(
-            int(row["train_size"])
-            for row in model_rows
-            if row["status"] == "skipped_after_failure"
-        ))
-        first_failed_size = non_completed[0][0] if non_completed else None
-        first_failure_type = non_completed[0][1] if non_completed else None
+        non_completed = sorted(
+            (
+                row
+                for row in model_rows
+                if row["status"] not in CAPACITY_COMPLETED_STATUSES and row["status"] != "skipped_after_failure"
+            ),
+            key=lambda row: int(row["train_size"]),
+        )
+        skipped = sorted(
+            set(
+                int(row["train_size"])
+                for row in model_rows
+                if row["status"] == "skipped_after_failure"
+            )
+        )
+        first_failure = non_completed[0] if non_completed else None
+        first_failed_size = int(first_failure["train_size"]) if first_failure is not None else None
+        first_failure_status = str(first_failure["status"]) if first_failure is not None else None
+        first_failure_type = str(first_failure.get("failure_type") or first_failure_status) if first_failure is not None else None
         largest = max(completed) if completed else None
         if largest is None:
-            conclusion = "Nenhum tamanho foi concluído com sucesso neste ambiente."
+            conclusion = "Nenhum tamanho foi concluído com sucesso neste ambiente. O limite máximo absoluto não foi determinado."
         elif first_failed_size is None:
             conclusion = (
                 f"O modelo foi executado com sucesso com pelo menos {largest:,} registros neste ambiente. "
-                "O limite máximo não foi determinado."
+                "O limite máximo absoluto não foi determinado."
             ).replace(",", ".")
         else:
             conclusion = (
-                f"O modelo foi executado com sucesso com até {largest:,} registros neste ambiente. "
-                f"O limite observado está entre {largest:,} e {first_failed_size:,} registros."
+                f"O modelo foi executado com sucesso até {largest:,} registros neste ambiente. "
+                f"A primeira falha foi observada em {first_failed_size:,} registros. "
+                "O limite máximo absoluto não foi determinado."
             ).replace(",", ".")
+        tested = sorted(set(int(row["train_size"]) for row in model_rows if row["status"] != "skipped_after_failure"))
         payload.append(
             {
                 "model": model,
-                "tested_train_sizes": sorted(set(int(row["train_size"]) for row in model_rows if row["status"] != "skipped_after_failure")),
+                "configured_train_sizes": sorted_sizes,
+                "tested_train_sizes": tested,
                 "completed_train_sizes": completed,
                 "largest_tested_successful_size": largest,
                 "first_failed_size": first_failed_size,
+                "first_failure_status": first_failure_status,
                 "first_failure_type": first_failure_type,
+                "skipped_train_sizes": skipped,
                 "untested_larger_sizes": skipped,
-                "configured_train_sizes": sorted_sizes,
+                "observed_interval_lower": largest,
+                "observed_interval_upper": first_failed_size,
                 "conclusion": conclusion,
             }
         )
