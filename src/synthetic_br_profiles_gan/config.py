@@ -226,6 +226,175 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
     raise ConfigurationError(f"Unknown model configuration: {model_name}")
 
 
+def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "models") -> None:
+    allowed_models = {"programmatic", "simple_gan", "ctgan"}
+    _reject_unknown(config, allowed_models, context)
+    for model_name, model_config in config.items():
+        if not isinstance(model_config, dict):
+            raise ConfigurationError(f"{context}.{model_name} must be a mapping.")
+        if model_name == "programmatic":
+            _reject_unknown(model_config, {"seed"}, f"{context}.programmatic")
+        elif model_name == "simple_gan":
+            allowed = {"seed", "latent_dim", "epochs", "batch_size", "learning_rate", "beta_1", "verbose_every", "metrics_every"}
+            _reject_unknown(model_config, allowed, f"{context}.simple_gan")
+            for key in ["seed", "latent_dim", "epochs", "batch_size", "verbose_every", "metrics_every"]:
+                if key in model_config:
+                    _require_non_negative_int(model_config, key, f"{context}.simple_gan")
+                    if key in {"latent_dim", "epochs", "batch_size"} and int(model_config[key]) <= 0:
+                        raise ConfigurationError(f"{context}.simple_gan.{key} must be greater than zero.")
+            if "learning_rate" in model_config and float(model_config["learning_rate"]) <= 0:
+                raise ConfigurationError(f"{context}.simple_gan.learning_rate must be greater than zero.")
+            if "beta_1" in model_config:
+                beta_1 = float(model_config["beta_1"])
+                if not 0 <= beta_1 < 1:
+                    raise ConfigurationError(f"{context}.simple_gan.beta_1 must be in [0, 1).")
+        elif model_name == "ctgan":
+            allowed = {"seed", "epochs", "batch_size", "verbose", "enable_gpu", "cuda", "library"}
+            _reject_unknown(model_config, allowed, f"{context}.ctgan")
+            for key in ["seed", "epochs", "batch_size"]:
+                if key in model_config:
+                    _require_non_negative_int(model_config, key, f"{context}.ctgan")
+                    if key in {"epochs", "batch_size"} and int(model_config[key]) <= 0:
+                        raise ConfigurationError(f"{context}.ctgan.{key} must be greater than zero.")
+            for key in ["verbose", "enable_gpu"]:
+                if key in model_config:
+                    _require_bool(model_config, key, f"{context}.ctgan")
+            if model_config.get("cuda") is not None and not isinstance(model_config.get("cuda"), bool):
+                raise ConfigurationError(f"{context}.ctgan.cuda must be true, false, or null.")
+            if "library" in model_config and not isinstance(model_config["library"], dict):
+                raise ConfigurationError(f"{context}.ctgan.library must be a mapping when provided.")
+
+
+def validate_benchmark_config(config: ConfigDict) -> None:
+    """Validate benchmark configuration keys, types, and feasible ranges."""
+    _reject_unknown(
+        config,
+        {"benchmark", "models", "calibration", "generation", "evaluation", "quality_gates", "outputs", "execution", "ranking"},
+        "benchmark_config",
+    )
+    benchmark = config.get("benchmark")
+    if not isinstance(benchmark, dict):
+        raise ConfigurationError("benchmark must be a mapping.")
+    _reject_unknown(
+        benchmark,
+        {
+            "name",
+            "models",
+            "seeds",
+            "calibration_rows",
+            "synthetic_rows",
+            "holdout_fraction",
+            "assessment_mode",
+            "continue_on_error",
+            "reference_date",
+        },
+        "benchmark",
+    )
+    if not isinstance(benchmark.get("name"), str) or not benchmark["name"]:
+        raise ConfigurationError("benchmark.name must be a non-empty string.")
+    models = benchmark.get("models")
+    if not isinstance(models, list) or not models:
+        raise ConfigurationError("benchmark.models must be a non-empty list.")
+    allowed_models = {"programmatic", "simple_gan", "ctgan"}
+    unknown_models = sorted(set(models) - allowed_models)
+    if unknown_models:
+        raise ConfigurationError(f"Unknown benchmark model(s): {', '.join(unknown_models)}")
+    if len(set(models)) != len(models):
+        raise ConfigurationError("benchmark.models must not contain duplicates.")
+    seeds = benchmark.get("seeds")
+    if not isinstance(seeds, list) or not seeds:
+        raise ConfigurationError("benchmark.seeds must be a non-empty list.")
+    for index, seed in enumerate(seeds):
+        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+            raise ConfigurationError(f"benchmark.seeds[{index}] must be a non-negative integer.")
+    if len(set(seeds)) != len(seeds):
+        raise ConfigurationError("benchmark.seeds must not contain duplicates.")
+    _require_positive_int(benchmark, "calibration_rows", "benchmark")
+    _require_positive_int(benchmark, "synthetic_rows", "benchmark")
+    try:
+        holdout_fraction = float(benchmark["holdout_fraction"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ConfigurationError("benchmark.holdout_fraction must be a float between 0 and 1.") from exc
+    if not 0 < holdout_fraction < 1:
+        raise ConfigurationError("benchmark.holdout_fraction must be between 0 and 1.")
+    if benchmark.get("assessment_mode", "experimental") not in {"smoke", "experimental", "approval"}:
+        raise ConfigurationError("benchmark.assessment_mode must be smoke, experimental, or approval.")
+    if not isinstance(benchmark.get("continue_on_error", True), bool):
+        raise ConfigurationError("benchmark.continue_on_error must be true or false.")
+    if not isinstance(benchmark.get("reference_date", "2026-07-26"), str) or not benchmark.get("reference_date", ""):
+        raise ConfigurationError("benchmark.reference_date must be a non-empty YYYY-MM-DD string.")
+
+    model_overrides = config.get("models", {})
+    if not isinstance(model_overrides, dict):
+        raise ConfigurationError("models must be a mapping.")
+    _validate_benchmark_model_overrides(model_overrides, "models")
+
+    calibration = config.get("calibration", {})
+    if not isinstance(calibration, dict):
+        raise ConfigurationError("calibration must be a mapping when provided.")
+    calibration_for_validation = {
+        **calibration,
+        "seed": seeds[0],
+        "num_rows": int(benchmark["calibration_rows"]),
+        "holdout_fraction": holdout_fraction,
+    }
+    validate_calibration_config(calibration_for_validation, "calibration")
+
+    generation = config.get("generation", {"batch_size": 1024, "max_batches": 20, "date_format": "%Y-%m-%d"})
+    if not isinstance(generation, dict):
+        raise ConfigurationError("generation must be a mapping when provided.")
+    validate_generation_config({"rows": int(benchmark["synthetic_rows"]), **generation}, "generation")
+
+    evaluation = config.get("evaluation", {})
+    if not isinstance(evaluation, dict):
+        raise ConfigurationError("evaluation must be a mapping when provided.")
+    _reject_unknown(evaluation, {"privacy"}, "evaluation")
+    privacy = evaluation.get("privacy", {})
+    if not isinstance(privacy, dict):
+        raise ConfigurationError("evaluation.privacy must be a mapping when provided.")
+    _reject_unknown(privacy, {"max_nearest_neighbor_rows", "exclude_columns"}, "evaluation.privacy")
+    if "max_nearest_neighbor_rows" in privacy:
+        _require_positive_int(privacy, "max_nearest_neighbor_rows", "evaluation.privacy")
+
+    quality_gates = {"assessment_mode": benchmark.get("assessment_mode", "experimental"), **config.get("quality_gates", {})}
+    if not isinstance(config.get("quality_gates", {}), dict):
+        raise ConfigurationError("quality_gates must be a mapping when provided.")
+    validate_quality_gate_config(quality_gates, "quality_gates")
+
+    outputs = config.get("outputs")
+    if not isinstance(outputs, dict):
+        raise ConfigurationError("outputs must be a mapping.")
+    _reject_unknown(outputs, {"base_directory", "export_csv", "export_parquet", "export_json", "export_individual_xlsx"}, "outputs")
+    if not isinstance(outputs.get("base_directory"), str) or not outputs["base_directory"]:
+        raise ConfigurationError("outputs.base_directory must be a non-empty path string.")
+    base_directory = Path(outputs["base_directory"])
+    if base_directory.exists() and not base_directory.is_dir():
+        raise ConfigurationError("outputs.base_directory must point to a directory, not a file.")
+    for key in ["export_csv", "export_parquet", "export_json"]:
+        if key in outputs:
+            _require_bool(outputs, key, "outputs")
+    if "export_individual_xlsx" in outputs:
+        _require_bool(outputs, "export_individual_xlsx", "outputs")
+
+    execution = config.get("execution", {})
+    if not isinstance(execution, dict):
+        raise ConfigurationError("execution must be a mapping when provided.")
+    _reject_unknown(execution, {"parallelism"}, "execution")
+    if "parallelism" in execution:
+        _require_positive_int(execution, "parallelism", "execution")
+        if int(execution["parallelism"]) != 1:
+            raise ConfigurationError("execution.parallelism currently supports only 1.")
+
+    ranking = config.get("ranking", {})
+    if not isinstance(ranking, dict):
+        raise ConfigurationError("ranking must be a mapping when provided.")
+    _reject_unknown(ranking, {"enabled", "weights"}, "ranking")
+    if "enabled" in ranking:
+        _require_bool(ranking, "enabled", "ranking")
+    if ranking.get("enabled", False):
+        raise ConfigurationError("ranking.enabled must remain false until exploratory ranking is implemented.")
+
+
 def validate_pipeline_config(config: ConfigDict) -> None:
     """Validate the resolved pipeline configuration before execution."""
     _reject_unknown(

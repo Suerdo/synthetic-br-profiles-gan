@@ -156,9 +156,15 @@ def generate_profiles(
     candidates: list[pd.DataFrame] = []
     valid_masks: list[pd.Series] = []
     attempts = 0
+    sampling_seconds = 0.0
+    postprocessing_seconds = 0.0
+    candidate_validation_seconds = 0.0
 
     for attempts in range(1, int(max_batches) + 1):
+        stage_started = time.perf_counter()
         core = synthesizer.sample(int(batch_size))
+        sampling_seconds += time.perf_counter() - stage_started
+        stage_started = time.perf_counter()
         final = finalizar_perfis_sinteticos(
             core,
             fake=fake,
@@ -166,7 +172,10 @@ def generate_profiles(
             rng=rng,
             date_format=date_format,
         )
+        postprocessing_seconds += time.perf_counter() - stage_started
+        stage_started = time.perf_counter()
         validation = validate_profile_dataframe(final, metadata=metadata, final=True, reference_date=reference_date)
+        candidate_validation_seconds += time.perf_counter() - stage_started
         candidates.append(final)
         valid_masks.append(validation.valid_mask)
         accepted_so_far = int(pd.concat(valid_masks, ignore_index=True).sum())
@@ -188,16 +197,25 @@ def generate_profiles(
         rejection_reasons=full_validation.report.get("reason_counts", {}),
         attempts=attempts,
     )
+    selection.accounting["sampling_seconds"] = float(sampling_seconds)
+    selection.accounting["postprocessing_seconds"] = float(postprocessing_seconds)
+    selection.accounting["candidate_validation_seconds"] = float(candidate_validation_seconds)
     return selection.selected, selection.accounting, full_validation.report
 
 
-def run_pipeline(
+def run_pipeline_on_splits(
     config: ConfigDict | None = None,
     model_name: str | None = None,
+    train: pd.DataFrame | None = None,
+    holdout: pd.DataFrame | None = None,
+    metadata: DatasetMetadata | None = None,
     require_approved: bool = False,
+    started_at_utc: datetime | None = None,
 ) -> dict[str, Any]:
-    """Run calibration, train, generation, validation, evaluation, gates, and export."""
-    started = datetime.now(timezone.utc)
+    """Run training, generation, validation, evaluation, gates, and export on provided splits."""
+    if train is None or holdout is None:
+        raise ValueError("run_pipeline_on_splits requires train and holdout dataframes.")
+    started = started_at_utc or datetime.now(timezone.utc)
     effective = deep_merge(DEFAULT_PIPELINE_CONFIG, config or {})
     selected_model = model_name or str(effective.get("model", "programmatic"))
     effective["model"] = selected_model
@@ -209,16 +227,13 @@ def run_pipeline(
         seed_torch=selected_model in {"ctgan", "ctgan_synthesizer"},
     )
     run_id = build_run_id(started)
-    metadata = default_metadata()
+    metadata = metadata or default_metadata()
     reference_date = str(effective["reference_date"])
     artifacts_root = Path(effective["artifacts_root"])
     requested_rows = int(effective["generation"]["rows"])
+    stage_durations: dict[str, float] = {}
 
     LOGGER.info("pipeline_started", extra={"run_id": run_id, "model": selected_model, "seed": seed})
-
-    calibration = create_calibration(effective["calibration"])
-    train = calibration["train"]
-    holdout = calibration["holdout"]
 
     default_model_seed = seed + 100_003 if selected_model == "programmatic" else seed
     model_config = deep_merge({"seed": default_model_seed}, effective.get("models", {}).get(selected_model, {}))
@@ -227,9 +242,12 @@ def run_pipeline(
     model_config = _resolved_model_config(selected_model, model_config)
     effective.setdefault("models", {})[selected_model] = model_config
     model_dir = model_artifact_dir(artifacts_root, selected_model, run_id) / "model"
+    stage_started = time.perf_counter()
     synthesizer = train_synthesizer(selected_model, train, metadata, config=model_config, output_dir=model_dir)
+    stage_durations["training_seconds"] = float(time.perf_counter() - stage_started)
 
     generation_config = effective["generation"]
+    stage_started = time.perf_counter()
     dataset, generation_accounting, candidate_validation = generate_profiles(
         synthesizer=synthesizer,
         n_target=requested_rows,
@@ -240,7 +258,11 @@ def run_pipeline(
         max_batches=int(generation_config["max_batches"]),
         date_format=str(generation_config["date_format"]),
     )
+    stage_durations["generation_seconds"] = float(time.perf_counter() - stage_started)
+    stage_started = time.perf_counter()
     validation = validate_profile_dataframe(dataset, metadata=metadata, final=True, reference_date=reference_date).report
+    stage_durations["validation_seconds"] = float(time.perf_counter() - stage_started)
+    stage_started = time.perf_counter()
     evaluation = evaluate_synthetic_data(
         dataset,
         train,
@@ -248,10 +270,14 @@ def run_pipeline(
         metadata,
         max_nearest_neighbor_rows=int(effective.get("evaluation", {}).get("privacy", {}).get("max_nearest_neighbor_rows", 1000)),
     )
+    stage_durations["evaluation_seconds"] = float(time.perf_counter() - stage_started)
+    stage_started = time.perf_counter()
     gates = evaluate_quality_gates(validation, evaluation, effective["quality_gates"])
+    stage_durations["quality_gates_seconds"] = float(time.perf_counter() - stage_started)
 
     status = gates.status
     paths = prepare_run_directories(artifacts_root, run_id, status)
+    stage_started = time.perf_counter()
     artifact_paths = export_dataset(dataset, paths.status_dir, export_xlsx=bool(effective["export"].get("xlsx", True)))
     validation_path = write_json(validation, paths.status_dir / "validation.json")
     evaluation_path = write_json(evaluation, paths.status_dir / "evaluation.json")
@@ -275,6 +301,7 @@ def run_pipeline(
     holdout_path = paths.status_dir / "holdout.parquet"
     train.to_parquet(train_path, index=False)
     holdout.to_parquet(holdout_path, index=False)
+    stage_durations["export_seconds"] = float(time.perf_counter() - stage_started)
 
     ended = datetime.now(timezone.utc)
     manifest_paths = {
@@ -304,6 +331,7 @@ def run_pipeline(
     manifest["seed_state"] = seed_state_to_dict(seed_state)
     manifest["generation_accounting"] = generation_accounting
     manifest["quality_gate_failures"] = gates.failures
+    manifest["stage_durations_seconds"] = stage_durations
     manifest_path = write_json(manifest, paths.status_dir / "manifest.json")
     root_manifest_path = write_json(manifest, paths.run_dir / "manifest.json")
     manifest_paths["manifest"] = manifest_path
@@ -319,6 +347,7 @@ def run_pipeline(
         "quality_gates": gates_payload,
         "generation": generation_accounting,
         "manifest": manifest,
+        "stage_durations": stage_durations,
         "paths": manifest_paths,
         "model_dir": model_dir,
     }
@@ -326,6 +355,29 @@ def run_pipeline(
     if require_approved and status != "approved":
         raise QualityGateError(f"Run {run_id} finished with status={status}.")
     return result
+
+
+def run_pipeline(
+    config: ConfigDict | None = None,
+    model_name: str | None = None,
+    require_approved: bool = False,
+) -> dict[str, Any]:
+    """Run calibration, train, generation, validation, evaluation, gates, and export."""
+    started = datetime.now(timezone.utc)
+    effective = deep_merge(DEFAULT_PIPELINE_CONFIG, config or {})
+    selected_model = model_name or str(effective.get("model", "programmatic"))
+    effective["model"] = selected_model
+    validate_pipeline_config(effective)
+    calibration = create_calibration(effective["calibration"])
+    return run_pipeline_on_splits(
+        config=effective,
+        model_name=selected_model,
+        train=calibration["train"],
+        holdout=calibration["holdout"],
+        metadata=calibration["metadata"],
+        require_approved=require_approved,
+        started_at_utc=started,
+    )
 
 
 def gerar_sinteticos_com_metricas(

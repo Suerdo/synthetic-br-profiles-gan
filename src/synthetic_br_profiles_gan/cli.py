@@ -11,6 +11,7 @@ from typing import Sequence
 
 import pandas as pd
 
+from synthetic_br_profiles_gan.benchmark import run_benchmark
 from synthetic_br_profiles_gan.calibration import save_calibration_splits
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge, load_yaml_config
 from synthetic_br_profiles_gan.evaluation.metrics import evaluate_against_reference
@@ -97,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--model", default=None, choices=["programmatic", "simple_gan", "ctgan"])
     pipeline.add_argument("--config", default="configs/pipeline.yaml")
     pipeline.add_argument("--require-approved", action="store_true")
+
+    benchmark = subparsers.add_parser("benchmark", help="Run a reproducible synthesizer benchmark.")
+    benchmark.add_argument("--config", default="configs/benchmark.yaml")
+    benchmark.add_argument("--models", nargs="+", choices=["programmatic", "simple_gan", "ctgan"], default=None)
+    benchmark.add_argument("--seeds", nargs="+", type=int, default=None)
     return parser
 
 
@@ -196,6 +202,28 @@ def command_pipeline(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "approved" else 2 if args.require_approved else 0
 
 
+def command_benchmark(args: argparse.Namespace) -> int:
+    """Handle benchmark."""
+    config = _load_config(args.config)
+    config.setdefault("benchmark", {})
+    if args.models is not None:
+        config["benchmark"]["models"] = args.models
+    if args.seeds is not None:
+        config["benchmark"]["seeds"] = args.seeds
+    result = run_benchmark(config)
+    LOGGER.info(
+        "benchmark_complete",
+        extra={
+            "benchmark_id": result["benchmark_id"],
+            "status": result["status"],
+            "benchmark_dir": str(result["benchmark_dir"]),
+            "completed_runs": result["completed_runs"],
+            "failed_runs": result["failed_runs"],
+        },
+    )
+    return 0 if result["status"] == "completed" else 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI."""
     parser = build_parser()
@@ -208,6 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evaluate": command_evaluate,
         "validate": command_validate,
         "pipeline": command_pipeline,
+        "benchmark": command_benchmark,
     }
     try:
         return int(commands[args.command](args))

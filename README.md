@@ -140,6 +140,46 @@ As métricas relacionais incluem correlações Pearson/Spearman, diferenças ent
 
 Os indicadores de diversidade e privacidade incluem duplicidade, match exato com o conjunto de treinamento e com o conjunto de holdout, combinações únicas, cobertura de categorias, Distance to Closest Record e Nearest Neighbor Distance Ratio. Esses indicadores não provam anonimização.
 
+## Benchmark experimental
+
+O benchmark experimental compara `programmatic`, `simple_gan` e `ctgan` sobre a mesma base de calibração por seed. Para cada seed, o pipeline cria uma única calibração, divide em conjunto de treinamento e conjunto de holdout, executa os modelos configurados e consolida métricas individuais em artefatos de benchmark.
+
+A configuração piloto fica em `configs/benchmark.yaml`. A matriz padrão é:
+
+- modelos: `programmatic`, `simple_gan` e `ctgan`;
+- seeds: `11`, `22` e `33`;
+- base de calibração: `5000` registros;
+- dados sintéticos por execução: `2000` registros;
+- conjunto de holdout: `20%`;
+- modo de avaliação: `experimental`.
+
+Executar o benchmark piloto:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark.yaml
+```
+
+Também é possível sobrescrever modelos e seeds pela CLI:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark.yaml \
+  --models programmatic simple_gan ctgan \
+  --seeds 11 22 33
+```
+
+Para uma validação rápida apenas com o baseline programático:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-programmatic.yaml
+```
+
+Os artefatos são salvos em `artifacts/benchmarks/<benchmark_id>/`. Eles incluem `benchmark_manifest.json`, `runs.json`, `results.parquet`, `results.csv`, `run_summary.parquet`, `run_summary.csv`, `summary.json`, `failures.json` e referências para os `run_id` individuais em `artifacts/runs/`.
+
+O benchmark-piloto é exploratório. Três seeds ainda não produzem evidência definitiva; menor distância estatística não implica maior privacidade; e nenhum modelo é necessariamente superior em todos os critérios. Os resultados dependem da base de calibração controlada.
+
 ## Quality gates
 
 Os quality gates configuráveis ficam em `configs/quality_gates.yaml` e no bloco `quality_gates` de `configs/pipeline.yaml`.

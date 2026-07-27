@@ -46,7 +46,7 @@ class CTGANSynthesizer:
         except ImportError as exc:
             raise ModelBackendUnavailable(
                 "The standalone ctgan package is required for CTGANSynthesizer. "
-                "Install ctgan>=0.12.1,<0.13."
+                "Install with: pip install -e \".[ctgan]\""
             ) from exc
         return CTGAN
 

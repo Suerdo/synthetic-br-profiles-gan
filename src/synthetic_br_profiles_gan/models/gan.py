@@ -19,7 +19,7 @@ def _require_tensorflow():
         from tensorflow.keras.optimizers import Adam
     except ImportError as exc:
         raise ModelBackendUnavailable(
-            "TensorFlow/Keras is required for SimpleTabularGAN. Install the TensorFlow extra/dependency."
+            "TensorFlow/Keras is required for SimpleTabularGAN. Install with: pip install -e \".[simple-gan]\""
         ) from exc
     return Sequential, layers, Adam
 
