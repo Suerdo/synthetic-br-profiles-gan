@@ -250,16 +250,35 @@ def split_train_holdout(
     df: pd.DataFrame,
     holdout_fraction: float = 0.2,
     seed: int = 41,
+    train_rows: int | None = None,
+    holdout_rows: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split calibration data into train and holdout without leakage."""
+    """Split calibration data into train and holdout without leakage.
+
+    When ``train_rows`` and ``holdout_rows`` are provided, the split uses those
+    exact sizes after deterministic shuffling. The fraction-based behavior is
+    preserved for existing callers.
+    """
     if not 0 < holdout_fraction < 1:
         raise ValueError("holdout_fraction must be between 0 and 1.")
+    if (train_rows is None) != (holdout_rows is None):
+        raise ValueError("train_rows and holdout_rows must be provided together.")
     rng = np.random.default_rng(seed)
     indices = np.arange(len(df))
     rng.shuffle(indices)
-    holdout_size = max(1, int(round(len(df) * holdout_fraction)))
-    holdout_idx = indices[:holdout_size]
-    train_idx = indices[holdout_size:]
+    if train_rows is not None and holdout_rows is not None:
+        train_size = int(train_rows)
+        holdout_size = int(holdout_rows)
+        if train_size <= 0 or holdout_size <= 0:
+            raise ValueError("train_rows and holdout_rows must be greater than zero.")
+        if train_size + holdout_size > len(df):
+            raise ValueError("Requested split sizes exceed the number of calibration rows.")
+        train_idx = indices[:train_size]
+        holdout_idx = indices[train_size : train_size + holdout_size]
+    else:
+        holdout_size = max(1, int(round(len(df) * holdout_fraction)))
+        holdout_idx = indices[:holdout_size]
+        train_idx = indices[holdout_size:]
     train = df.iloc[train_idx].reset_index(drop=True)
     holdout = df.iloc[holdout_idx].reset_index(drop=True)
     return train, holdout

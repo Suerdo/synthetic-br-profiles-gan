@@ -103,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--config", default="configs/benchmark.yaml")
     benchmark.add_argument("--models", nargs="+", choices=["programmatic", "simple_gan", "ctgan"], default=None)
     benchmark.add_argument("--seeds", nargs="+", type=int, default=None)
+    benchmark.add_argument("--train-sizes", nargs="+", type=int, default=None)
     return parser
 
 
@@ -210,6 +211,9 @@ def command_benchmark(args: argparse.Namespace) -> int:
         config["benchmark"]["models"] = args.models
     if args.seeds is not None:
         config["benchmark"]["seeds"] = args.seeds
+    if args.train_sizes is not None:
+        config["benchmark"]["train_sizes"] = args.train_sizes
+        config["benchmark"].pop("calibration_rows", None)
     result = run_benchmark(config)
     LOGGER.info(
         "benchmark_complete",

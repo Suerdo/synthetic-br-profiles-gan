@@ -144,6 +144,8 @@ Os indicadores de diversidade e privacidade incluem duplicidade, match exato com
 
 O benchmark experimental compara `programmatic`, `simple_gan` e `ctgan` sobre a mesma base de calibração por seed. Para cada seed, o pipeline cria uma única calibração, divide em conjunto de treinamento e conjunto de holdout, executa os modelos configurados e consolida métricas individuais em artefatos de benchmark.
 
+O benchmark reutiliza o pipeline existente. Ele não possui uma segunda implementação de treino, geração, validação, avaliação ou quality gates.
+
 A configuração piloto fica em `configs/benchmark.yaml`. A matriz padrão é:
 
 - modelos: `programmatic`, `simple_gan` e `ctgan`;
@@ -176,9 +178,53 @@ python -m synthetic_br_profiles_gan benchmark \
   --config configs/benchmark-programmatic.yaml
 ```
 
-Os artefatos são salvos em `artifacts/benchmarks/<benchmark_id>/`. Eles incluem `benchmark_manifest.json`, `runs.json`, `results.parquet`, `results.csv`, `run_summary.parquet`, `run_summary.csv`, `summary.json`, `failures.json` e referências para os `run_id` individuais em `artifacts/runs/`.
+### Sensibilidade ao tamanho do treinamento
+
+O benchmark também possui configurações para avaliar sensibilidade e escalabilidade com tamanhos exatos de conjunto de treinamento. Nesse modo, o parâmetro principal é `train_sizes`, e não `calibration_rows`. A base de calibração total é calculada para que, depois do split, o conjunto de treinamento e o conjunto de holdout tenham tamanhos exatos.
+
+Com `holdout_fraction: 0.20`, os tamanhos usados são:
+
+| Treino | Holdout | Calibração total |
+| ---: | ---: | ---: |
+| 1.000 | 250 | 1.250 |
+| 5.000 | 1.250 | 6.250 |
+| 20.000 | 5.000 | 25.000 |
+
+A validação técnica rápida fica em `configs/benchmark-scaling-smoke.yaml`:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-scaling-smoke.yaml
+```
+
+O experimento principal fica em `configs/benchmark-scaling.yaml`:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-scaling.yaml
+```
+
+Também é possível sobrescrever os tamanhos pela CLI:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-scaling.yaml \
+  --train-sizes 1000 5000 20000
+```
+
+Para cada combinação de seed e `train_size`, o benchmark cria uma única base de calibração, um único conjunto de treinamento e um único conjunto de holdout. Esses mesmos dados são reutilizados por `programmatic`, `simple_gan` e `ctgan`. Os 5.000 dados sintéticos do experimento principal permanecem constantes entre os tamanhos, para tornar as métricas comparáveis.
+
+O modo de escalabilidade registra tempo de treinamento, tempo de geração, tempo total, pico aproximado de memória residente, tamanho do modelo salvo, tamanho dos artefatos, contadores de updates da GAN tabular densa simples, batches inferidos da CTGAN e ganhos marginais entre `1000 → 5000`, `5000 → 20000` e `1000 → 20000`.
+
+`execution.warmup_backends` carrega minimamente backends opcionais antes das execuções e registra `backend_warmup_seconds` fora do tempo de treinamento. `execution.rotate_model_order_by_seed` alterna a ordem dos modelos por seed para reduzir viés de cache. Essas opções não alteram a ordenação final dos arquivos consolidados.
+
+Os limites em `resource_limits` são operacionais e opcionais. Valores `null` significam monitoramento sem interrupção automática. Quando um limite configurado é excedido, a execução é marcada como `resource_limited` para análise de escalabilidade, sem transformar automaticamente uma falha de quality gate em falha técnica.
+
+Os artefatos são salvos em `artifacts/benchmarks/<benchmark_id>/`. Eles incluem `benchmark_manifest.json`, `environment.json`, `resource_limits.json`, `runs.json`, `results.parquet`, `results.csv`, `run_summary.parquet`, `run_summary.csv`, `summary.json`, `aggregate_by_model_and_size.json`, `marginal_gains.json`, `scalability_limits.json`, `failures.json` e referências para os `run_id` individuais em `artifacts/runs/`.
 
 O benchmark-piloto é exploratório. Três seeds ainda não produzem evidência definitiva; menor distância estatística não implica maior privacidade; e nenhum modelo é necessariamente superior em todos os critérios. Os resultados dependem da base de calibração controlada.
+
+O tamanho de 20.000 registros é o limite superior do experimento atual, não um limite máximo absoluto dos modelos. Quando uma execução conclui nesse tamanho, a interpretação correta é que o modelo foi executado com sucesso com até 20.000 registros neste ambiente.
 
 ## Quality gates
 

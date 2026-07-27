@@ -25,6 +25,56 @@ Total esperado:
 
 Para cada seed, o benchmark cria uma única base de calibração e um único par treinamento/holdout. Esses mesmos dados são reutilizados por todos os modelos naquela seed. Essa decisão evita que diferenças entre modelos sejam confundidas com diferenças entre bases de calibração.
 
+## Sensibilidade e escalabilidade
+
+O benchmark de sensibilidade estende o piloto para comparar os três sintetizadores em conjuntos de treinamento com tamanhos exatos:
+
+| Cenário | Treino | Holdout | Calibração total |
+| --- | ---: | ---: | ---: |
+| Dados reduzidos | 1.000 | 250 | 1.250 |
+| Referência operacional | 5.000 | 1.250 | 6.250 |
+| Limite superior do experimento atual | 20.000 | 5.000 | 25.000 |
+
+Nesse modo, o parâmetro principal é `train_sizes`. Ele representa o tamanho exato do conjunto de treinamento, não o total da base de calibração. O total da calibração é calculado a partir de:
+
+```text
+holdout_rows = train_rows × holdout_fraction / (1 - holdout_fraction)
+```
+
+Com `holdout_fraction = 0.20`, isso equivale a `holdout_rows = train_rows × 0.25`.
+
+Para cada combinação de seed e tamanho, o benchmark cria uma única calibração, um único conjunto de treinamento e um único conjunto de holdout. Esses mesmos dados são reutilizados pelos modelos `programmatic`, `simple_gan` e `ctgan`.
+
+### Validação técnica
+
+`configs/benchmark-scaling-smoke.yaml` executa:
+
+```text
+3 modelos × 3 tamanhos × 1 seed = 9 execuções
+```
+
+Essa configuração usa poucas épocas e serve para validar caminhos técnicos, artefatos, métricas, manifesto, monitoramento de memória e consolidação. Ela não deve ser interpretada como avaliação estatística conclusiva.
+
+### Experimento principal
+
+`configs/benchmark-scaling.yaml` executa:
+
+```text
+3 modelos × 3 tamanhos × 3 seeds = 27 execuções
+```
+
+Os hiperparâmetros dos modelos permanecem constantes entre os tamanhos. Isso significa que conjuntos maiores produzem mais batches por época e, no caso da GAN tabular densa simples, mais atualizações do gerador e do discriminador.
+
+Para a GAN tabular densa simples com `batch_size: 128` e `epochs: 20`, o histórico real deve registrar:
+
+| Treino | Batches por época | Updates do gerador | Updates do discriminador |
+| ---: | ---: | ---: | ---: |
+| 1.000 | 8 | 160 | 320 |
+| 5.000 | 40 | 800 | 1.600 |
+| 20.000 | 157 | 3.140 | 6.280 |
+
+Para a CTGAN com `batch_size: 500`, o benchmark registra batches inferidos a partir de tamanho de treino, batch e épocas. Essa inferência é identificada como tal e não afirma que a rotina interna da biblioteca seja idêntica à rotina da GAN tabular densa simples.
+
 ## Como reproduzir
 
 Executar o piloto completo:
@@ -50,6 +100,28 @@ python -m synthetic_br_profiles_gan benchmark \
   --config configs/benchmark-programmatic.yaml
 ```
 
+Executar a validação de escalabilidade:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-scaling-smoke.yaml
+```
+
+Executar o experimento principal de escalabilidade:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-scaling.yaml
+```
+
+Sobrescrever tamanhos de treinamento:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-scaling.yaml \
+  --train-sizes 1000 5000 20000
+```
+
 ## Artefatos
 
 Cada benchmark recebe um `benchmark_id` próprio e salva resultados em:
@@ -66,6 +138,11 @@ artifacts/
       run_summary.parquet
       run_summary.csv
       summary.json
+      environment.json
+      resource_limits.json
+      aggregate_by_model_and_size.json
+      marginal_gains.json
+      scalability_limits.json
       failures.json
       calibration/
         seed-11/
@@ -73,10 +150,17 @@ artifacts/
           train.parquet
           holdout.parquet
           metadata.json
+          train-1000/
+            calibration.parquet
+            train.parquet
+            holdout.parquet
+            metadata.json
       runs/
         <model>/
           seed-<seed>/
             run-reference.json
+            train-1000/
+              run-reference.json
       diagnostics/
 ```
 
@@ -101,6 +185,53 @@ O arquivo `run_summary.parquet` resume as principais métricas por execução:
 
 O arquivo `summary.json` agrega resultados por modelo, incluindo contagens de status e estatísticas descritivas das métricas principais: média, mediana, desvio-padrão, mínimo, máximo e intervalo de confiança exploratório de 95% quando há dados suficientes.
 
+No benchmark de escalabilidade, `results.parquet` e `run_summary.parquet` incluem também `train_size` e `holdout_size`. O arquivo `aggregate_by_model_and_size.json` agrega as métricas por modelo e tamanho de treinamento. O arquivo `marginal_gains.json` registra as mudanças entre `1000_to_5000`, `5000_to_20000` e `1000_to_20000`.
+
+Valores negativos em métricas de distância, como Wasserstein normalizado da renda, KS da renda, TVD de gênero e diferença de correlação, indicam melhora relativa nessa métrica. Essa leitura não substitui a análise por métrica, porque nenhum resultado único resume qualidade, privacidade, custo e validade estrutural.
+
+## Monitoramento de recursos
+
+O benchmark registra:
+
+- memória residente antes e depois do treinamento;
+- pico aproximado de memória residente do processo;
+- tempo de treinamento, geração, validação, avaliação e exportação;
+- tamanho do modelo salvo;
+- tamanho dos artefatos da execução;
+- CPU e quantidade de threads disponíveis quando a medição está disponível.
+
+A medição de memória usa `psutil`. Como TensorFlow e PyTorch podem alocar memória nativa, o valor deve ser interpretado como aproximação do processo observado, não como medição perfeita de todos os recursos do sistema.
+
+`resource_limits` permite configurar limites operacionais opcionais. Valores `null` significam monitoramento sem interrupção automática. Quando `stop_larger_sizes_after_resource_failure` está ativo, tamanhos maiores do mesmo modelo podem ser pulados depois de uma falha de recurso em tamanho menor.
+
+## Warm-up e ordem de execução
+
+`execution.warmup_backends` carrega minimamente os backends opcionais antes das execuções e registra `backend_warmup_seconds`. Esse tempo não entra em `training_seconds`.
+
+`execution.rotate_model_order_by_seed` reduz viés de cache alternando a ordem dos modelos por seed:
+
+```text
+seed 11: programmatic, simple_gan, ctgan
+seed 22: simple_gan, ctgan, programmatic
+seed 33: ctgan, programmatic, simple_gan
+```
+
+A ordenação final dos arquivos consolidados continua por tamanho, modelo e seed.
+
+## Limites observados
+
+`scalability_limits.json` informa, para cada modelo, os tamanhos testados, os tamanhos concluídos tecnicamente, o maior tamanho testado com sucesso e a primeira falha observada quando houver.
+
+Uma execução `approved`, `quarantined` ou `rejected` concluiu tecnicamente. `rejected` indica falha de quality gate obrigatório, não necessariamente falha de escalabilidade. Falhas técnicas e limites operacionais são registrados separadamente como `failed` ou `resource_limited`.
+
+A conclusão deve ser lida como limite observado neste ambiente. Exemplo adequado:
+
+```text
+A CTGAN foi executada com sucesso com até 20.000 registros de treinamento neste experimento.
+```
+
+Isso não significa que 20.000 seja o limite máximo da CTGAN.
+
 ## Estados e falhas
 
 Cada execução individual preserva os estados do pipeline:
@@ -122,12 +253,16 @@ Quando `continue_on_error: true`, falhas individuais são registradas em `failur
 ## Decisões metodológicas
 
 - A comparação usa a mesma calibração, o mesmo conjunto de treinamento e o mesmo conjunto de holdout para todos os modelos dentro de uma mesma seed.
+- No modo de escalabilidade, a comparação usa a mesma calibração, o mesmo conjunto de treinamento e o mesmo conjunto de holdout para todos os modelos dentro de cada combinação de seed e `train_size`.
 - As mesmas métricas, validadores, quality gates e colunas excluídas das métricas de privacidade são aplicados a todos os modelos.
 - `execution.parallelism` permanece `1` por padrão para evitar competição por memória entre TensorFlow, CTGAN e PyTorch.
 - O ranking exploratório existe apenas como configuração futura e permanece desativado por padrão.
+- O experimento com três seeds é exploratório. Ele ajuda a observar tendências, mas não prova saturação definitiva nem superioridade geral de um modelo.
 
 ## Limitações
 
 O benchmark-piloto é uma ferramenta exploratória. Três seeds ainda não produzem evidência estatística definitiva. Menor distância estatística não implica maior privacidade, e nenhum modelo é necessariamente superior em todos os critérios.
 
 Os resultados dependem da base de calibração controlada. Como a calibração não representa perfeitamente a população brasileira, as conclusões devem ser interpretadas como comparação experimental dentro deste ambiente, não como medida final de qualidade populacional.
+
+O cenário de 1.000 registros é útil como limite inferior, mas o holdout de 250 linhas não oferece evidência robusta para categorias raras. O cenário de 5.000 registros funciona como referência operacional do piloto. O cenário de 20.000 registros é apenas o limite superior do experimento atual, não um limite máximo absoluto dos modelos.

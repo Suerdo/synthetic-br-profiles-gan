@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -211,6 +211,7 @@ def run_pipeline_on_splits(
     metadata: DatasetMetadata | None = None,
     require_approved: bool = False,
     started_at_utc: datetime | None = None,
+    resource_probe: Callable[[], float | None] | None = None,
 ) -> dict[str, Any]:
     """Run training, generation, validation, evaluation, gates, and export on provided splits."""
     if train is None or holdout is None:
@@ -232,6 +233,7 @@ def run_pipeline_on_splits(
     artifacts_root = Path(effective["artifacts_root"])
     requested_rows = int(effective["generation"]["rows"])
     stage_durations: dict[str, float] = {}
+    stage_resources: dict[str, float | None] = {}
 
     LOGGER.info("pipeline_started", extra={"run_id": run_id, "model": selected_model, "seed": seed})
 
@@ -242,11 +244,17 @@ def run_pipeline_on_splits(
     model_config = _resolved_model_config(selected_model, model_config)
     effective.setdefault("models", {})[selected_model] = model_config
     model_dir = model_artifact_dir(artifacts_root, selected_model, run_id) / "model"
+    if resource_probe is not None:
+        stage_resources["memory_before_training_mb"] = resource_probe()
     stage_started = time.perf_counter()
     synthesizer = train_synthesizer(selected_model, train, metadata, config=model_config, output_dir=model_dir)
     stage_durations["training_seconds"] = float(time.perf_counter() - stage_started)
+    if resource_probe is not None:
+        stage_resources["memory_after_training_mb"] = resource_probe()
 
     generation_config = effective["generation"]
+    if resource_probe is not None:
+        stage_resources["memory_before_generation_mb"] = resource_probe()
     stage_started = time.perf_counter()
     dataset, generation_accounting, candidate_validation = generate_profiles(
         synthesizer=synthesizer,
@@ -259,6 +267,8 @@ def run_pipeline_on_splits(
         date_format=str(generation_config["date_format"]),
     )
     stage_durations["generation_seconds"] = float(time.perf_counter() - stage_started)
+    if resource_probe is not None:
+        stage_resources["memory_after_generation_mb"] = resource_probe()
     stage_started = time.perf_counter()
     validation = validate_profile_dataframe(dataset, metadata=metadata, final=True, reference_date=reference_date).report
     stage_durations["validation_seconds"] = float(time.perf_counter() - stage_started)
@@ -332,6 +342,8 @@ def run_pipeline_on_splits(
     manifest["generation_accounting"] = generation_accounting
     manifest["quality_gate_failures"] = gates.failures
     manifest["stage_durations_seconds"] = stage_durations
+    if stage_resources:
+        manifest["stage_resources"] = stage_resources
     manifest_path = write_json(manifest, paths.status_dir / "manifest.json")
     root_manifest_path = write_json(manifest, paths.run_dir / "manifest.json")
     manifest_paths["manifest"] = manifest_path
@@ -348,6 +360,7 @@ def run_pipeline_on_splits(
         "generation": generation_accounting,
         "manifest": manifest,
         "stage_durations": stage_durations,
+        "stage_resources": stage_resources,
         "paths": manifest_paths,
         "model_dir": model_dir,
     }

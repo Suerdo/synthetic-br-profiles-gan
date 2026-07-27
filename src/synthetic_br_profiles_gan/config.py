@@ -269,7 +269,18 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     """Validate benchmark configuration keys, types, and feasible ranges."""
     _reject_unknown(
         config,
-        {"benchmark", "models", "calibration", "generation", "evaluation", "quality_gates", "outputs", "execution", "ranking"},
+        {
+            "benchmark",
+            "models",
+            "calibration",
+            "generation",
+            "evaluation",
+            "quality_gates",
+            "outputs",
+            "execution",
+            "resource_limits",
+            "ranking",
+        },
         "benchmark_config",
     )
     benchmark = config.get("benchmark")
@@ -282,6 +293,7 @@ def validate_benchmark_config(config: ConfigDict) -> None:
             "models",
             "seeds",
             "calibration_rows",
+            "train_sizes",
             "synthetic_rows",
             "holdout_fraction",
             "assessment_mode",
@@ -309,7 +321,21 @@ def validate_benchmark_config(config: ConfigDict) -> None:
             raise ConfigurationError(f"benchmark.seeds[{index}] must be a non-negative integer.")
     if len(set(seeds)) != len(seeds):
         raise ConfigurationError("benchmark.seeds must not contain duplicates.")
-    _require_positive_int(benchmark, "calibration_rows", "benchmark")
+    has_calibration_rows = "calibration_rows" in benchmark
+    has_train_sizes = "train_sizes" in benchmark
+    if not has_calibration_rows and not has_train_sizes:
+        raise ConfigurationError("benchmark.calibration_rows or benchmark.train_sizes must be provided.")
+    if has_calibration_rows:
+        _require_positive_int(benchmark, "calibration_rows", "benchmark")
+    if has_train_sizes:
+        train_sizes = benchmark["train_sizes"]
+        if not isinstance(train_sizes, list) or not train_sizes:
+            raise ConfigurationError("benchmark.train_sizes must be a non-empty list.")
+        for index, size in enumerate(train_sizes):
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                raise ConfigurationError(f"benchmark.train_sizes[{index}] must be a positive integer.")
+        if len(set(train_sizes)) != len(train_sizes):
+            raise ConfigurationError("benchmark.train_sizes must not contain duplicates.")
     _require_positive_int(benchmark, "synthetic_rows", "benchmark")
     try:
         holdout_fraction = float(benchmark["holdout_fraction"])
@@ -317,6 +343,13 @@ def validate_benchmark_config(config: ConfigDict) -> None:
         raise ConfigurationError("benchmark.holdout_fraction must be a float between 0 and 1.") from exc
     if not 0 < holdout_fraction < 1:
         raise ConfigurationError("benchmark.holdout_fraction must be between 0 and 1.")
+    if has_train_sizes:
+        for train_size in benchmark["train_sizes"]:
+            holdout_rows = int(train_size) * holdout_fraction / (1.0 - holdout_fraction)
+            if abs(holdout_rows - round(holdout_rows)) > 1e-9:
+                raise ConfigurationError(
+                    "benchmark.train_sizes and benchmark.holdout_fraction must produce exact integer holdout sizes."
+                )
     if benchmark.get("assessment_mode", "experimental") not in {"smoke", "experimental", "approval"}:
         raise ConfigurationError("benchmark.assessment_mode must be smoke, experimental, or approval.")
     if not isinstance(benchmark.get("continue_on_error", True), bool):
@@ -332,10 +365,11 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     calibration = config.get("calibration", {})
     if not isinstance(calibration, dict):
         raise ConfigurationError("calibration must be a mapping when provided.")
+    calibration_rows_for_validation = int(benchmark.get("calibration_rows") or max(benchmark["train_sizes"]))
     calibration_for_validation = {
         **calibration,
         "seed": seeds[0],
-        "num_rows": int(benchmark["calibration_rows"]),
+        "num_rows": calibration_rows_for_validation,
         "holdout_fraction": holdout_fraction,
     }
     validate_calibration_config(calibration_for_validation, "calibration")
@@ -379,11 +413,39 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     execution = config.get("execution", {})
     if not isinstance(execution, dict):
         raise ConfigurationError("execution must be a mapping when provided.")
-    _reject_unknown(execution, {"parallelism"}, "execution")
+    _reject_unknown(execution, {"parallelism", "warmup_backends", "rotate_model_order_by_seed"}, "execution")
     if "parallelism" in execution:
         _require_positive_int(execution, "parallelism", "execution")
         if int(execution["parallelism"]) != 1:
             raise ConfigurationError("execution.parallelism currently supports only 1.")
+    for key in ["warmup_backends", "rotate_model_order_by_seed"]:
+        if key in execution:
+            _require_bool(execution, key, "execution")
+
+    resource_limits = config.get("resource_limits", {})
+    if not isinstance(resource_limits, dict):
+        raise ConfigurationError("resource_limits must be a mapping when provided.")
+    _reject_unknown(
+        resource_limits,
+        {
+            "max_training_seconds_per_run",
+            "max_total_seconds_per_run",
+            "max_peak_memory_mb",
+            "stop_larger_sizes_after_resource_failure",
+        },
+        "resource_limits",
+    )
+    for key in ["max_training_seconds_per_run", "max_total_seconds_per_run", "max_peak_memory_mb"]:
+        value = resource_limits.get(key)
+        if value is not None:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ConfigurationError(f"resource_limits.{key} must be positive or null.") from exc
+            if numeric <= 0:
+                raise ConfigurationError(f"resource_limits.{key} must be positive or null.")
+    if "stop_larger_sizes_after_resource_failure" in resource_limits:
+        _require_bool(resource_limits, "stop_larger_sizes_after_resource_failure", "resource_limits")
 
     ranking = config.get("ranking", {})
     if not isinstance(ranking, dict):
