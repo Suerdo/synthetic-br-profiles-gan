@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,8 +27,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=100, help="Epocas de treinamento da GAN.")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size de treinamento.")
     parser.add_argument("--batch-gen", type=int, default=2048, help="Tamanho do lote de candidatos gerados.")
-    parser.add_argument("--score-threshold", type=float, default=0.50, help="Limiar minimo do discriminador.")
+    parser.add_argument(
+        "--score-threshold",
+        type=float,
+        default=0.50,
+        help="Parametro legado mantido apenas para compatibilidade; nao filtra linhas no pipeline novo.",
+    )
     parser.add_argument("--max-batches", type=int, default=200, help="Maximo de lotes de candidatos.")
+    parser.add_argument(
+        "--model",
+        default="simple_gan",
+        choices=["programmatic", "simple_gan", "ctgan"],
+        help="Modelo usado pelo pipeline legado.",
+    )
     parser.add_argument(
         "--reference-date",
         default=None,
@@ -37,6 +49,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+    logger = logging.getLogger("run_pipeline")
     args = parse_args()
 
     try:
@@ -69,13 +83,14 @@ def main() -> None:
         score_threshold=args.score_threshold,
         max_batches=args.max_batches,
         reference_date=reference_date,
+        model_name=args.model,
     )
 
-    print("\nExecucao concluida.")
-    print(f"Dataset: {resultado['paths']['dataset']}")
-    print(f"Relatorio: {resultado['paths']['relatorio']}")
-    print("Resumo:")
-    print(json.dumps(resultado["relatorio"], indent=2, ensure_ascii=False, default=str))
+    dataset_path = resultado["paths"].get("legacy_dataset") or resultado["paths"].get("dataset_parquet")
+    report_path = resultado["paths"].get("legacy_relatorio") or resultado["paths"].get("manifest")
+    logger.info("execucao_concluida", extra={"dataset": str(dataset_path)})
+    logger.info("relatorio", extra={"relatorio": str(report_path)})
+    logger.info("resumo %s", json.dumps(resultado["relatorio"], indent=2, ensure_ascii=False, default=str))
 
 
 if __name__ == "__main__":

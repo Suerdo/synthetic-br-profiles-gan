@@ -23,12 +23,14 @@ def exportar_resultados(
     report_path = output_path / report_filename
 
     suffix = dataset_path.suffix.lower()
-    if suffix == ".xlsx":
+    if suffix == ".parquet":
+        dataset.to_parquet(dataset_path, index=False)
+    elif suffix == ".xlsx":
         dataset.to_excel(dataset_path, index=False)
     elif suffix == ".csv":
         dataset.to_csv(dataset_path, index=False)
     else:
-        raise ValueError("Formato de dataset nao suportado. Use .xlsx ou .csv.")
+        raise ValueError("Formato de dataset nao suportado. Use .parquet, .xlsx ou .csv.")
 
     with report_path.open("w", encoding="utf-8") as file:
         json.dump(relatorio, file, indent=2, ensure_ascii=False, default=str)

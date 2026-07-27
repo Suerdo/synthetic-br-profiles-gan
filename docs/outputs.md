@@ -1,54 +1,32 @@
-# Saídas Geradas
+# Saidas Geradas
 
-O script principal grava os artefatos em `data/outputs/`.
-
-## Dataset
-
-Arquivo padrão:
+As execucoes sao versionadas por `run_id` em `artifacts/runs/<run_id>/`.
 
 ```text
-data/outputs/dados_sinteticos_realistas.xlsx
+artifacts/
+  models/
+    <model>/
+      <run_id>/
+        model/
+  runs/
+    <run_id>/
+      approved/
+      quarantine/
+      manifest.json
+      config.yaml
 ```
 
-Colunas geradas:
+O dataset aprovado fica em `approved/`. Resultados reprovados ou em observacao ficam em `quarantine/`.
 
-- `Nome`
-- `Gênero`
-- `Data_Nascimento`
-- `CPF`
-- `CNH`
-- `RG`
-- `Titulo_Eleitor`
-- `Telefone`
-- `Renda`
+Arquivos principais:
 
-Esses campos são fictícios e destinados a ambientes controlados.
+- `dataset.parquet`: formato principal de processamento.
+- `dataset.xlsx`: exportacao opcional para usuarios.
+- `validation.json`: validacao estrutural.
+- `evaluation.json`: metricas contra treino e holdout.
+- `quality_gates.json`: status e falhas dos gates.
+- `generation.json`: contabilidade de candidatos, aceitos, rejeitados e excedentes validos.
+- `manifest.json`: ambiente, hashes, modelo, seed, status e commit Git quando disponivel.
+- `train.parquet` e `holdout.parquet`: splits usados para avaliacao.
 
-## Relatório de execução
-
-Arquivo padrão:
-
-```text
-data/outputs/relatorio_execucao.json
-```
-
-O relatório inclui:
-
-- tamanho-alvo da geração;
-- seed;
-- parâmetros da GAN;
-- total de candidatos;
-- taxa de aceitação;
-- tempo de geração;
-- throughput;
-- contagem de rejeições;
-- resumo univariado antes do pós-processamento;
-- colisões de identificadores;
-- métricas de validação final.
-
-## Versionamento das saídas
-
-`data/outputs/` é mantida no repositório com `.gitkeep`, mas os arquivos gerados localmente são ignorados pelo Git.
-
-Se for necessário publicar um exemplo pequeno, use `data/samples/` e garanta que ele seja claramente identificado como sintético.
-
+Arquivos de nomes fixos em `data/outputs/` permanecem apenas para compatibilidade do script legado.

@@ -1,155 +1,90 @@
-"""Geradores de identificadores ficticios com formato brasileiro.
+"""Generators for fictitious Brazilian identifiers and phone numbers.
 
-Os valores produzidos sao exclusivamente sinteticos e devem ser usados apenas
-em ambientes controlados de teste, pesquisa, homologacao e experimentacao.
+The generated values are local synthetic artifacts. The module never queries
+public or private registries and must not be used to claim that a document or
+phone number belongs, or does not belong, to a real person.
 """
 
 from __future__ import annotations
 
 import random
 
-VALID_DDDS = (
-    11,
-    12,
-    13,
-    14,
-    15,
-    16,
-    17,
-    18,
-    19,
-    21,
-    22,
-    24,
-    27,
-    28,
-    31,
-    32,
-    33,
-    34,
-    35,
-    37,
-    38,
-    41,
-    42,
-    43,
-    44,
-    45,
-    46,
-    47,
-    48,
-    49,
-    51,
-    53,
-    54,
-    55,
-    61,
-    62,
-    63,
-    64,
-    65,
-    66,
-    67,
-    68,
-    69,
-    71,
-    73,
-    74,
-    75,
-    77,
-    79,
-    81,
-    82,
-    83,
-    84,
-    85,
-    86,
-    87,
-    88,
-    89,
-    91,
-    92,
-    93,
-    94,
-    95,
-    96,
-    97,
-    98,
-    99,
-)
+from synthetic_br_profiles_gan.domain.brazil import STATE_DDDS, all_ddds
+
+VALID_DDDS = all_ddds()
 
 
-def _random_source(rng: random.Random | None = None):
+def _random_source(rng: random.Random | None = None) -> random.Random:
     return rng if rng is not None else random
 
 
 def gerar_cpf(rng: random.Random | None = None) -> str:
-    """Gera um CPF ficticio com mascara e digitos verificadores validos."""
+    """Generate a masked CPF with mathematically valid check digits."""
     random_source = _random_source(rng)
 
-    def calc_digito(digs: list[str]) -> str:
-        soma = sum(int(d) * w for d, w in zip(digs, range(len(digs) + 1, 1, -1)))
-        resto = 11 - (soma % 11)
-        return "0" if resto > 9 else str(resto)
+    def calc_digit(digits: list[str]) -> str:
+        total = sum(int(digit) * weight for digit, weight in zip(digits, range(len(digits) + 1, 1, -1)))
+        remainder = 11 - (total % 11)
+        return "0" if remainder > 9 else str(remainder)
 
-    numero = [str(random_source.randint(0, 9)) for _ in range(9)]
-    numero.append(calc_digito(numero))
-    numero.append(calc_digito(numero))
-    return (
-        f"{''.join(numero[:3])}."
-        f"{''.join(numero[3:6])}."
-        f"{''.join(numero[6:9])}-"
-        f"{''.join(numero[9:])}"
-    )
+    base = [str(random_source.randint(0, 9)) for _ in range(9)]
+    base.append(calc_digit(base))
+    base.append(calc_digit(base))
+    return f"{''.join(base[:3])}.{''.join(base[3:6])}.{''.join(base[6:9])}-{''.join(base[9:])}"
 
 
 def gerar_cnh(rng: random.Random | None = None) -> str:
-    """Gera um numero ficticio de CNH com 11 digitos."""
+    """Generate an 11-digit CNH-like number with local check digits."""
     random_source = _random_source(rng)
-    numero = [random_source.randint(0, 9) for _ in range(9)]
+    number = [random_source.randint(0, 9) for _ in range(9)]
 
-    soma = sum((9 - i) * numero[i] for i in range(9))
-    d1 = soma % 11
-    d1 = 0 if d1 >= 10 else d1
+    total = sum((9 - index) * number[index] for index in range(9))
+    digit_1 = total % 11
+    digit_1 = 0 if digit_1 >= 10 else digit_1
 
-    soma = sum((i + 1) * numero[i] for i in range(9))
-    d2 = soma % 11
-    d2 = 0 if d2 >= 10 else d2
+    total = sum((index + 1) * number[index] for index in range(9))
+    digit_2 = total % 11
+    digit_2 = 0 if digit_2 >= 10 else digit_2
 
-    return "".join(map(str, numero)) + str(d1) + str(d2)
+    return "".join(str(value) for value in number) + str(digit_1) + str(digit_2)
 
 
 def gerar_rg(rng: random.Random | None = None) -> str:
-    """Gera um RG ficticio no formato 00.000.000-0."""
+    """Generate a fictitious RG in the project format 00.000.000-0."""
     random_source = _random_source(rng)
-    numero = [str(random_source.randint(0, 9)) for _ in range(8)]
-    digito = random_source.randint(0, 9)
-    return f"{''.join(numero[:2])}.{''.join(numero[2:5])}.{''.join(numero[5:8])}-{digito}"
+    number = [str(random_source.randint(0, 9)) for _ in range(8)]
+    digit = random_source.randint(0, 9)
+    return f"{''.join(number[:2])}.{''.join(number[2:5])}.{''.join(number[5:8])}-{digit}"
 
 
-def gerar_titulo_eleitor(rng: random.Random | None = None) -> str:
-    """Gera titulo de eleitor ficticio com estrutura numerica plausivel."""
+def _titulo_eleitor_digits(number: str, uf_code: str) -> str:
+    first = sum(int(number[index]) * (9 - index) for index in range(8)) % 11
+    first = 0 if first == 10 else first
+    second = sum(int(number[index]) * (8 - index) for index in range(8)) + first * 9 + int(uf_code) * 10
+    second = second % 11
+    second = 0 if second == 10 else second
+    return str(first) + str(second)
+
+
+def gerar_titulo_eleitor(rng: random.Random | None = None, uf_codigo: int | None = None) -> str:
+    """Generate a fictitious voter title with the local check-digit rule."""
     random_source = _random_source(rng)
-
-    def calc_dv(num: str, uf: str) -> str:
-        d1 = sum(int(num[i]) * (9 - i) for i in range(8)) % 11
-        d1 = 0 if d1 == 10 else d1
-        d2 = sum(int(num[i]) * (8 - i) for i in range(8)) + d1 * 9 + int(uf) * 10
-        d2 = d2 % 11
-        d2 = 0 if d2 == 10 else d2
-        return str(d1) + str(d2)
-
-    numero = "".join(str(random_source.randint(0, 9)) for _ in range(8))
-    uf = f"{random_source.randint(1, 28):02d}"
-    dv = calc_dv(numero, uf)
-    return f"{numero[:4]} {numero[4:]} {uf} {dv}"
+    number = "".join(str(random_source.randint(0, 9)) for _ in range(8))
+    uf = f"{uf_codigo if uf_codigo is not None else random_source.randint(1, 28):02d}"
+    digits = _titulo_eleitor_digits(number, uf)
+    return f"{number[:4]} {number[4:]} {uf} {digits}"
 
 
-def gerar_telefone(rng: random.Random | None = None) -> str:
-    """Gera telefone celular ficticio no formato brasileiro."""
+def gerar_telefone(
+    rng: random.Random | None = None,
+    estado: str | None = None,
+    ddd: int | None = None,
+) -> str:
+    """Generate a fictitious Brazilian mobile phone compatible with a state or DDD."""
     random_source = _random_source(rng)
-    ddd = random_source.choice(VALID_DDDS)
-    prefixo = random_source.randint(90000, 99999)
-    sufixo = random_source.randint(1000, 9999)
-    return f"({ddd}) {prefixo}-{sufixo}"
-
+    if ddd is None:
+        ddd_pool = STATE_DDDS.get(str(estado), VALID_DDDS) if estado else VALID_DDDS
+        ddd = random_source.choice(tuple(ddd_pool))
+    prefix = random_source.randint(90000, 99999)
+    suffix = random_source.randint(1000, 9999)
+    return f"({int(ddd):02d}) {prefix}-{suffix}"

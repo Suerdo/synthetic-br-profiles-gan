@@ -1,0 +1,4 @@
+rows: 1000
+batch_size: 1024
+max_batches: 20
+date_format: "%Y-%m-%d"

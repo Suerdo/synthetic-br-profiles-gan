@@ -1,31 +1,331 @@
-"""Pipeline principal de geracao de perfis pessoais sinteticos brasileiros."""
+"""Pipeline services for Brazilian synthetic profile experiments."""
 
 from __future__ import annotations
 
+import logging
+import random
 import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
-from tensorflow.keras.optimizers import Adam
 
-from synthetic_br_profiles_gan.generators.demographics import (
-    criar_faker,
-    finalizar_perfis_sinteticos,
-    gerar_dataset_calibracao,
+from synthetic_br_profiles_gan.artifacts import (
+    export_dataset,
+    model_artifact_dir,
+    prepare_run_directories,
 )
-from synthetic_br_profiles_gan.models.gan import (
-    build_discriminator,
-    build_gan,
-    build_generator,
-    train_gan,
+from synthetic_br_profiles_gan.calibration import (
+    DEFAULT_CALIBRATION_CONFIG,
+    generate_calibration_dataset,
+    save_calibration_splits,
+    split_train_holdout,
 )
+from synthetic_br_profiles_gan.config import (
+    ConfigDict,
+    deep_merge,
+    save_yaml_config,
+    validate_calibration_config,
+    validate_model_config,
+    validate_pipeline_config,
+)
+from synthetic_br_profiles_gan.evaluation.metrics import evaluate_synthetic_data
+from synthetic_br_profiles_gan.evaluation.quality_gates import DEFAULT_QUALITY_GATES, evaluate_quality_gates
+from synthetic_br_profiles_gan.exceptions import QualityGateError
+from synthetic_br_profiles_gan.generation import select_valid_candidates
+from synthetic_br_profiles_gan.generators.demographics import criar_faker, finalizar_perfis_sinteticos
+from synthetic_br_profiles_gan.manifest import build_manifest, build_run_id, write_json
+from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
+from synthetic_br_profiles_gan.models.base import create_synthesizer
 from synthetic_br_profiles_gan.models.preprocessing import DataPreprocessor
 from synthetic_br_profiles_gan.reports.execution import exportar_resultados
-from synthetic_br_profiles_gan.utils.reproducibility import set_global_seed
-from synthetic_br_profiles_gan.validators.brazilian import avaliar_regras_final, checar_unicidade
+from synthetic_br_profiles_gan.utils.reproducibility import seed_state_to_dict, set_global_seed
+from synthetic_br_profiles_gan.validators.structural import validate_profile_dataframe
+
+LOGGER = logging.getLogger(__name__)
+
+
+DEFAULT_PIPELINE_CONFIG: ConfigDict = {
+    "seed": 41,
+    "artifacts_root": "artifacts",
+    "reference_date": "2026-07-26",
+    "model": "programmatic",
+    "calibration": DEFAULT_CALIBRATION_CONFIG,
+    "models": {
+        "programmatic": {},
+        "simple_gan": {
+            "seed": 41,
+            "latent_dim": 16,
+            "epochs": 10,
+            "batch_size": 64,
+            "verbose_every": 5,
+            "metrics_every": 5,
+        },
+        "ctgan": {
+            "seed": 41,
+            "epochs": 10,
+            "batch_size": 100,
+            "verbose": False,
+            "enable_gpu": False,
+            "cuda": None,
+        },
+    },
+    "generation": {
+        "rows": 1000,
+        "batch_size": 1024,
+        "max_batches": 20,
+        "date_format": "%Y-%m-%d",
+    },
+    "evaluation": {
+        "privacy": {
+            "max_nearest_neighbor_rows": 1000,
+            "exclude_columns": ["Nome", "Data_Nascimento", "CPF", "CNH", "RG", "Titulo_Eleitor", "Telefone"],
+        }
+    },
+    "quality_gates": DEFAULT_QUALITY_GATES,
+    "export": {"xlsx": True, "primary_format": "parquet"},
+}
+
+
+def create_calibration(config: ConfigDict | None = None, output_dir: str | Path | None = None) -> dict[str, Any]:
+    """Create calibration, train, and holdout splits."""
+    effective = deep_merge(DEFAULT_CALIBRATION_CONFIG, config or {})
+    validate_calibration_config(effective)
+    metadata = default_metadata()
+    df = generate_calibration_dataset(config=effective)
+    train, holdout = split_train_holdout(
+        df,
+        holdout_fraction=float(effective["holdout_fraction"]),
+        seed=int(effective["seed"]),
+    )
+    paths = None
+    if output_dir is not None:
+        paths = save_calibration_splits(df, train, holdout, output_dir, metadata=metadata)
+    return {"calibration": df, "train": train, "holdout": holdout, "metadata": metadata, "paths": paths}
+
+
+def _resolved_model_config(model_name: str, config: ConfigDict) -> ConfigDict:
+    normalized = model_name.lower().replace("-", "_")
+    if normalized == "programmatic":
+        return deep_merge(DEFAULT_CALIBRATION_CONFIG, config)
+    if normalized in {"simple_gan", "simple_tabular_gan", "dense_tabular_gan"}:
+        from synthetic_br_profiles_gan.models.simple_gan import DEFAULT_SIMPLE_GAN_CONFIG
+
+        return deep_merge(DEFAULT_SIMPLE_GAN_CONFIG, config)
+    if normalized in {"ctgan", "ctgan_synthesizer"}:
+        from synthetic_br_profiles_gan.models.ctgan import DEFAULT_CTGAN_CONFIG
+
+        return deep_merge(DEFAULT_CTGAN_CONFIG, config)
+    return config
+
+
+def train_synthesizer(
+    model_name: str,
+    train: pd.DataFrame,
+    metadata: DatasetMetadata,
+    config: ConfigDict | None = None,
+    output_dir: str | Path | None = None,
+):
+    """Train one synthesizer on the train split only."""
+    model_config = _resolved_model_config(model_name, config or {})
+    validate_model_config(model_name, model_config)
+    synthesizer = create_synthesizer(model_name, model_config)
+    LOGGER.info("training_synthesizer", extra={"model": model_name, "rows": len(train)})
+    synthesizer.fit(train[metadata.model_columns], metadata)
+    if output_dir is not None:
+        synthesizer.save(Path(output_dir))
+    return synthesizer
+
+
+def generate_profiles(
+    synthesizer,
+    n_target: int,
+    metadata: DatasetMetadata,
+    seed: int,
+    reference_date: str,
+    batch_size: int = 1024,
+    max_batches: int = 20,
+    date_format: str = "%Y-%m-%d",
+) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
+    """Generate final profiles and account for accepted, rejected, and surplus rows."""
+    fake = criar_faker(seed)
+    rng = random.Random(seed)
+    candidates: list[pd.DataFrame] = []
+    valid_masks: list[pd.Series] = []
+    attempts = 0
+
+    for attempts in range(1, int(max_batches) + 1):
+        core = synthesizer.sample(int(batch_size))
+        final = finalizar_perfis_sinteticos(
+            core,
+            fake=fake,
+            referencia=datetime.strptime(reference_date, "%Y-%m-%d"),
+            rng=rng,
+            date_format=date_format,
+        )
+        validation = validate_profile_dataframe(final, metadata=metadata, final=True, reference_date=reference_date)
+        candidates.append(final)
+        valid_masks.append(validation.valid_mask)
+        accepted_so_far = int(pd.concat(valid_masks, ignore_index=True).sum())
+        if accepted_so_far >= n_target:
+            break
+
+    all_candidates = pd.concat(candidates, ignore_index=True) if candidates else pd.DataFrame()
+    all_masks = pd.concat(valid_masks, ignore_index=True) if valid_masks else pd.Series(dtype=bool)
+    full_validation = validate_profile_dataframe(
+        all_candidates,
+        metadata=metadata,
+        final=True,
+        reference_date=reference_date,
+    )
+    selection = select_valid_candidates(
+        all_candidates,
+        all_masks,
+        n_target=n_target,
+        rejection_reasons=full_validation.report.get("reason_counts", {}),
+        attempts=attempts,
+    )
+    return selection.selected, selection.accounting, full_validation.report
+
+
+def run_pipeline(
+    config: ConfigDict | None = None,
+    model_name: str | None = None,
+    require_approved: bool = False,
+) -> dict[str, Any]:
+    """Run calibration, train, generation, validation, evaluation, gates, and export."""
+    started = datetime.now(timezone.utc)
+    effective = deep_merge(DEFAULT_PIPELINE_CONFIG, config or {})
+    selected_model = model_name or str(effective.get("model", "programmatic"))
+    effective["model"] = selected_model
+    validate_pipeline_config(effective)
+    seed = int(effective["seed"])
+    seed_state = set_global_seed(
+        seed,
+        seed_tensorflow=selected_model in {"simple_gan", "simple_tabular_gan", "dense_tabular_gan"},
+        seed_torch=selected_model in {"ctgan", "ctgan_synthesizer"},
+    )
+    run_id = build_run_id(started)
+    metadata = default_metadata()
+    reference_date = str(effective["reference_date"])
+    artifacts_root = Path(effective["artifacts_root"])
+    requested_rows = int(effective["generation"]["rows"])
+
+    LOGGER.info("pipeline_started", extra={"run_id": run_id, "model": selected_model, "seed": seed})
+
+    calibration = create_calibration(effective["calibration"])
+    train = calibration["train"]
+    holdout = calibration["holdout"]
+
+    default_model_seed = seed + 100_003 if selected_model == "programmatic" else seed
+    model_config = deep_merge({"seed": default_model_seed}, effective.get("models", {}).get(selected_model, {}))
+    if selected_model == "programmatic":
+        model_config = deep_merge(effective["calibration"], model_config)
+    model_config = _resolved_model_config(selected_model, model_config)
+    effective.setdefault("models", {})[selected_model] = model_config
+    model_dir = model_artifact_dir(artifacts_root, selected_model, run_id) / "model"
+    synthesizer = train_synthesizer(selected_model, train, metadata, config=model_config, output_dir=model_dir)
+
+    generation_config = effective["generation"]
+    dataset, generation_accounting, candidate_validation = generate_profiles(
+        synthesizer=synthesizer,
+        n_target=requested_rows,
+        metadata=metadata,
+        seed=seed,
+        reference_date=reference_date,
+        batch_size=int(generation_config["batch_size"]),
+        max_batches=int(generation_config["max_batches"]),
+        date_format=str(generation_config["date_format"]),
+    )
+    validation = validate_profile_dataframe(dataset, metadata=metadata, final=True, reference_date=reference_date).report
+    evaluation = evaluate_synthetic_data(
+        dataset,
+        train,
+        holdout,
+        metadata,
+        max_nearest_neighbor_rows=int(effective.get("evaluation", {}).get("privacy", {}).get("max_nearest_neighbor_rows", 1000)),
+    )
+    gates = evaluate_quality_gates(validation, evaluation, effective["quality_gates"])
+
+    status = gates.status
+    paths = prepare_run_directories(artifacts_root, run_id, status)
+    artifact_paths = export_dataset(dataset, paths.status_dir, export_xlsx=bool(effective["export"].get("xlsx", True)))
+    validation_path = write_json(validation, paths.status_dir / "validation.json")
+    evaluation_path = write_json(evaluation, paths.status_dir / "evaluation.json")
+    gates_payload = {
+        "status": gates.status,
+        "failures": gates.failures,
+        "metrics_checked": gates.metrics_checked,
+    }
+    gates_path = write_json(gates_payload, paths.status_dir / "quality_gates.json")
+    config_path = save_yaml_config(effective, paths.status_dir / "config.yaml")
+    root_config_path = save_yaml_config(effective, paths.run_dir / "config.yaml")
+    generation_path = write_json(
+        {
+            "generation_accounting": generation_accounting,
+            "candidate_validation": candidate_validation,
+        },
+        paths.status_dir / "generation.json",
+    )
+    metadata_path = metadata.save(paths.status_dir / "metadata.json")
+    train_path = paths.status_dir / "train.parquet"
+    holdout_path = paths.status_dir / "holdout.parquet"
+    train.to_parquet(train_path, index=False)
+    holdout.to_parquet(holdout_path, index=False)
+
+    ended = datetime.now(timezone.utc)
+    manifest_paths = {
+        **artifact_paths,
+        "validation": validation_path,
+        "evaluation": evaluation_path,
+        "quality_gates": gates_path,
+        "generation": generation_path,
+        "config": config_path,
+        "metadata": metadata_path,
+        "train": train_path,
+        "holdout": holdout_path,
+    }
+    manifest = build_manifest(
+        run_id=run_id,
+        model=selected_model,
+        seed=seed,
+        requested_rows=requested_rows,
+        generated_rows=len(dataset),
+        status=status,
+        config=effective,
+        artifact_paths=manifest_paths,
+        started_at_utc=started,
+        ended_at_utc=ended,
+        root=Path.cwd(),
+    )
+    manifest["seed_state"] = seed_state_to_dict(seed_state)
+    manifest["generation_accounting"] = generation_accounting
+    manifest["quality_gate_failures"] = gates.failures
+    manifest_path = write_json(manifest, paths.status_dir / "manifest.json")
+    root_manifest_path = write_json(manifest, paths.run_dir / "manifest.json")
+    manifest_paths["manifest"] = manifest_path
+    manifest_paths["root_manifest"] = root_manifest_path
+    manifest_paths["root_config"] = root_config_path
+
+    result = {
+        "run_id": run_id,
+        "status": status,
+        "dataset": dataset,
+        "validation": validation,
+        "evaluation": evaluation,
+        "quality_gates": gates_payload,
+        "generation": generation_accounting,
+        "manifest": manifest,
+        "paths": manifest_paths,
+        "model_dir": model_dir,
+    }
+    LOGGER.info("pipeline_finished", extra={"run_id": run_id, "status": status})
+    if require_approved and status != "approved":
+        raise QualityGateError(f"Run {run_id} finished with status={status}.")
+    return result
 
 
 def gerar_sinteticos_com_metricas(
@@ -38,78 +338,80 @@ def gerar_sinteticos_com_metricas(
     score_threshold: float = 0.50,
     max_batches: int = 200,
 ) -> tuple[pd.DataFrame, np.ndarray, dict]:
-    """Gera amostras aceitas pela GAN e retorna metricas operacionais."""
-    t0 = time.perf_counter()
-    total_candidatos = 0
-    total_aceitos = 0
-    rejeicoes = Counter()
-    aceitos_scaled = []
-    aceitos_orig = []
+    """Legacy candidate generation without discriminator-threshold acceptance.
 
-    for _ in range(max_batches):
+    ``score_threshold`` is retained only for backward-compatible diagnostics.
+    Acceptance is based on structural/domain rules, not on calibrated realism.
+    """
+    started = time.perf_counter()
+    accepted_scaled: list[np.ndarray] = []
+    accepted_orig: list[pd.DataFrame] = []
+    candidate_frames: list[pd.DataFrame] = []
+    valid_masks: list[pd.Series] = []
+    discriminator_scores: list[np.ndarray] = []
+    rejection_counts: Counter[str] = Counter()
+
+    for batch_index in range(int(max_batches)):
         noise = np.random.normal(0, 1, (batch_gen, latent_dim))
-        gen_scaled = generator.predict(noise, verbose=0)
-        total_candidatos += batch_gen
+        generated_scaled = generator.predict(noise, verbose=0)
+        scores = discriminator.predict(generated_scaled, verbose=0).reshape(-1)
+        discriminator_scores.append(scores)
+        generated = preprocessor.inverse_transform(generated_scaled)
 
-        scores = discriminator.predict(gen_scaled, verbose=0).reshape(-1)
-        df_orig = preprocessor.inverse_transform(gen_scaled)
+        if {"Idade", "Sexo", "Renda"}.issubset(generated.columns):
+            mask = (
+                generated["Idade"].between(18, 65)
+                & generated["Renda"].between(1200, 25000)
+                & generated["Sexo"].between(0, 1)
+            )
+            rejection_counts["dominio_invalido"] += int((~mask).sum())
+        else:
+            validation = validate_profile_dataframe(generated, metadata=preprocessor.metadata, final=False)
+            mask = validation.valid_mask
+            rejection_counts.update(validation.report.get("reason_counts", {}))
 
-        idade = df_orig["Idade"]
-        sexo = df_orig["Sexo"]
-        renda = df_orig["Renda"]
+        candidate_frames.append(generated)
+        valid_masks.append(mask.reset_index(drop=True))
+        if int(pd.concat(valid_masks, ignore_index=True).sum()) >= n_target:
+            accepted_scaled.append(generated_scaled[mask.to_numpy()])
+            accepted_orig.append(generated.loc[mask])
+            break
+        accepted_scaled.append(generated_scaled[mask.to_numpy()])
+        accepted_orig.append(generated.loc[mask])
 
-        mask_dom = idade.between(18, 65) & renda.between(1200, 25000) & sexo.between(0, 1)
-        mask_disc = scores >= score_threshold
-        mask_ok = mask_dom & mask_disc
-        n_ok = int(mask_ok.sum())
+    total_candidates = int(sum(len(frame) for frame in candidate_frames))
+    if not accepted_orig or sum(len(frame) for frame in accepted_orig) == 0:
+        raise RuntimeError("No candidate passed structural/domain validation.")
 
-        rejeicoes["rejeitado_total"] += int((~mask_ok).sum())
-        rejeicoes["rejeitado_disc"] += int((mask_dom & ~mask_disc).sum())
-        rejeicoes["rejeitado_dom"] += int((~mask_dom).sum())
-
-        if n_ok > 0:
-            aceitos_scaled.append(gen_scaled[mask_ok])
-            aceitos_orig.append(df_orig.loc[mask_ok])
-
-            total_aceitos += n_ok
-            if total_aceitos >= n_target:
-                break
-
-    if total_aceitos == 0:
-        raise RuntimeError("Nenhuma amostra foi aceita. Reduza score_threshold ou aumente max_batches.")
-    if total_aceitos < n_target:
-        raise RuntimeError(
-            f"Apenas {total_aceitos} amostras foram aceitas para n_target={n_target}. "
-            "Reduza score_threshold ou aumente max_batches."
-        )
-
-    x_scaled = np.vstack(aceitos_scaled)[:n_target]
-    df_final = pd.concat(aceitos_orig, ignore_index=True).iloc[:n_target].copy()
-
-    tempo = time.perf_counter() - t0
-    relatorio = {
+    all_accepted_orig = pd.concat(accepted_orig, ignore_index=True)
+    all_accepted_scaled = np.vstack(accepted_scaled)
+    selected_orig = all_accepted_orig.iloc[:n_target].copy()
+    selected_scaled = all_accepted_scaled[:n_target]
+    accepted_by_rules = int(len(all_accepted_orig))
+    score_values = np.concatenate(discriminator_scores) if discriminator_scores else np.array([])
+    duration = time.perf_counter() - started
+    report = {
         "n_target": int(n_target),
-        "score_threshold": float(score_threshold),
+        "score_threshold_diagnostic_only": float(score_threshold),
         "batch_gen": int(batch_gen),
         "max_batches": int(max_batches),
-        "total_candidatos": int(total_candidatos),
-        "total_aceitos": int(n_target),
-        "total_rejeitados": int(total_candidatos - n_target),
-        "taxa_aceitacao": float(n_target / total_candidatos),
-        "tempo_geracao_seg": float(tempo),
-        "throughput_aceitos_por_seg": float(n_target / tempo),
-        "rejeicoes": dict(rejeicoes),
-        "resumo_univariado": {
-            "idade_media": float(df_final["Idade"].mean()),
-            "idade_dp": float(df_final["Idade"].std()),
-            "renda_media": float(df_final["Renda"].mean()),
-            "renda_mediana": float(df_final["Renda"].median()),
-            "renda_dp": float(df_final["Renda"].std()),
-            "sexo_prop_1": float((df_final["Sexo"].round().clip(0, 1) == 1).mean()),
+        "total_candidates": total_candidates,
+        "accepted_by_rules": accepted_by_rules,
+        "selected": int(len(selected_orig)),
+        "accepted_but_not_selected": int(max(accepted_by_rules - len(selected_orig), 0)),
+        "rejected_by_rules": int(total_candidates - accepted_by_rules),
+        "attempts_or_batches": int(len(candidate_frames)),
+        "real_acceptance_rate": float(0.0 if total_candidates == 0 else accepted_by_rules / total_candidates),
+        "rejection_reasons": dict(rejection_counts),
+        "tempo_geracao_seg": float(duration),
+        "throughput_selecionados_por_seg": float(0.0 if duration == 0 else len(selected_orig) / duration),
+        "discriminator_score_diagnostics": {
+            "mean": float(score_values.mean()) if score_values.size else None,
+            "min": float(score_values.min()) if score_values.size else None,
+            "max": float(score_values.max()) if score_values.size else None,
         },
     }
-
-    return df_final, x_scaled, relatorio
+    return selected_orig, selected_scaled, report
 
 
 def executar_pipeline(
@@ -124,78 +426,49 @@ def executar_pipeline(
     score_threshold: float = 0.50,
     max_batches: int = 200,
     reference_date: datetime | None = None,
+    model_name: str = "simple_gan",
 ) -> dict:
-    """Executa o fluxo completo: calibracao, treino, geracao, validacao e exportacao."""
-    set_global_seed(seed)
-    fake = criar_faker(seed)
-    reference_date = reference_date or datetime.now()
-
-    print("Gerando base de calibracao...")
-    real_data = gerar_dataset_calibracao(calibration_size)
-
-    print("Pre-processando...")
-    preprocessor = DataPreprocessor()
-    processed_data = preprocessor.fit_transform(real_data)
-    output_dim = processed_data.shape[1]
-
-    print("Construindo e treinando a GAN...")
-    generator = build_generator(latent_dim, output_dim)
-    discriminator = build_discriminator(output_dim)
-    discriminator.compile(
-        loss="binary_crossentropy",
-        optimizer=Adam(learning_rate=0.0001, beta_1=0.5),
-        metrics=["accuracy"],
-    )
-    gan = build_gan(generator, discriminator, latent_dim)
-    train_gan(
-        generator=generator,
-        discriminator=discriminator,
-        gan=gan,
-        data=processed_data,
-        latent_dim=latent_dim,
-        epochs=epochs,
-        batch_size=batch_size,
-    )
-
-    print("Gerando dados sinteticos e metricas...")
-    synthetic_raw, synthetic_scaled, relatorio = gerar_sinteticos_com_metricas(
-        generator=generator,
-        discriminator=discriminator,
-        preprocessor=preprocessor,
-        latent_dim=latent_dim,
-        n_target=n_target,
-        batch_gen=batch_gen,
-        score_threshold=score_threshold,
-        max_batches=max_batches,
-    )
-
-    synthetic_final = finalizar_perfis_sinteticos(
-        synthetic_raw,
-        fake=fake,
-        referencia=reference_date,
-    )
-
-    identificadores = ["CPF", "CNH", "RG", "Titulo_Eleitor", "Telefone"]
-    colisoes = checar_unicidade(synthetic_final, identificadores)
-    relatorio.update(
+    """Backward-compatible entry point used by the legacy script."""
+    reference = (reference_date or datetime.now()).strftime("%Y-%m-%d")
+    config = deep_merge(
+        DEFAULT_PIPELINE_CONFIG,
         {
-            "seed": int(seed),
-            "calibration_size": int(calibration_size),
-            "latent_dim": int(latent_dim),
-            "epochs": int(epochs),
-            "batch_size": int(batch_size),
-            "data_referencia": reference_date.strftime("%Y-%m-%d"),
-            "gerado_em_utc": datetime.now(timezone.utc).isoformat(),
-            "colisoes_cpf": int(colisoes.get("CPF", 0)),
-            "colisoes_identificadores": colisoes,
-            "validacoes_finais": avaliar_regras_final(synthetic_final),
-        }
+            "seed": seed,
+            "artifacts_root": str(Path(output_dir) / "artifacts"),
+            "reference_date": reference,
+            "model": model_name,
+            "calibration": {"seed": seed, "num_rows": calibration_size},
+            "models": {
+                "simple_gan": {
+                    "seed": seed,
+                    "latent_dim": latent_dim,
+                    "epochs": epochs,
+                    "batch_size": batch_size,
+                },
+                "programmatic": {"seed": seed},
+            },
+            "generation": {
+                "rows": n_target,
+                "batch_size": batch_gen,
+                "max_batches": max_batches,
+                "date_format": "%Y-%m-%d",
+            },
+        },
     )
-
-    paths = exportar_resultados(synthetic_final, relatorio, output_dir)
-    return {
-        "dataset": synthetic_final,
-        "scaled": synthetic_scaled,
-        "relatorio": relatorio,
-        "paths": paths,
-    }
+    result = run_pipeline(config=config, model_name=model_name)
+    legacy_paths = exportar_resultados(
+        result["dataset"],
+        {
+            "seed": seed,
+            "n_target": n_target,
+            "run_id": result["run_id"],
+            "status": result["status"],
+            "generation": result["generation"],
+            "validation": result["validation"],
+            "quality_gates": result["quality_gates"],
+        },
+        output_dir,
+    )
+    result["paths"]["legacy_dataset"] = legacy_paths["dataset"]
+    result["paths"]["legacy_relatorio"] = legacy_paths["relatorio"]
+    return result

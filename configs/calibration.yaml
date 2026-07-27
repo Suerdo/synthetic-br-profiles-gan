@@ -1,0 +1,15 @@
+seed: 41
+num_rows: 20000
+holdout_fraction: 0.2
+income:
+  min: 800.0
+  max: 50000.0
+age:
+  min: 18
+  max: 85
+region_weights:
+  Norte: 0.09
+  Nordeste: 0.27
+  Centro-Oeste: 0.08
+  Sudeste: 0.42
+  Sul: 0.14

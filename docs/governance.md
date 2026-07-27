@@ -1,49 +1,37 @@
-# Governança, LGPD e Uso Responsável
+# Governanca, LGPD e Uso Responsavel
 
-Este projeto foi organizado para apoiar uma discussão acadêmica sobre dados sintéticos, IA generativa e governança de dados.
+O projeto e um artefato de pesquisa e experimentacao. Ele gera dados sinteticos locais e nao consulta Receita Federal, cartorios, operadoras, bases governamentais ou servicos externos.
 
-## Princípios adotados
+Principios adotados:
 
-- **Finalidade**: uso restrito a pesquisa, testes, homologação e experimentação.
-- **Minimização**: geração de campos suficientes para simular perfis, sem coletar dados reais.
-- **Privacy by design**: identificadores são fictícios e gerados por regras locais.
-- **Accountability**: o relatório registra seed, parâmetros, métricas e validações.
-- **Rastreabilidade**: os artefatos gerados são separados em `data/outputs/`.
-- **Controle de risco**: o projeto inclui avisos contra uso indevido e validações estruturais.
+- finalidade restrita a pesquisa, teste, homologacao e demonstracao;
+- minimizacao de dados e ausencia de bases pessoais reais;
+- identificadores ficticios gerados localmente;
+- validacao estrutural sem consulta oficial;
+- avaliacao de utilidade e indicadores de risco de memorizacao;
+- rastreabilidade por configuracao, run id, hashes e manifestos.
 
-## LGPD
+Dados sinteticos nao devem ser automaticamente considerados anonimizados. As metricas de privacidade do pipeline sao indicadores e nao substituem avaliacao juridica, relatorio de impacto, governanca institucional ou auditoria.
 
-A LGPD é usada como referência conceitual para governança, segurança, prevenção e responsabilização. O projeto não deve ser interpretado como certificação de conformidade legal.
+Quality gates obrigatorios ausentes, invalidos ou `NaN` reprovam a execucao quando sao necessarios para aprovacao. Smoke tests pequenos servem para validar o funcionamento tecnico do pipeline e sao colocados em quarentena quando nao atingem o tamanho minimo configurado.
 
-Dados sintéticos não são automaticamente anonimizados. Antes de usar dados sintéticos em ambiente produtivo ou compartilhamento externo, recomenda-se avaliar:
+## Quality gates
 
-- origem dos dados usados para calibração;
-- risco de reidentificação;
-- memorização do modelo;
-- finalidade e contexto de uso;
-- controles de acesso e descarte;
-- documentação dos parâmetros de geração.
+| Gate | Metrica | Unidade | Limite padrao | Obrigatorio | Interpretacao e comportamento quando ausente |
+| --- | --- | --- | --- | --- | --- |
+| `min_evaluation_rows` | `row_counts.synthetic` | linhas | `100` | em `approval` | Tamanho minimo para sustentar aprovacao estatistica; ausente, invalido ou abaixo do limite rejeita em `approval` e coloca em quarentena nos demais modos. |
+| `invalid_rows_max` | `validation.invalid_rows` | linhas | `0` | sim | Linhas finais estruturalmente invalidas; ausente, invalido ou acima do limite rejeita. |
+| `duplicated_identifier_max` | contagem de motivos `*_duplicado` para identificadores | linhas | `0` | sim | Colisoes de identificadores gerados; ausente, invalido ou acima do limite rejeita. |
+| `null_required_fields_max` | `validation.reason_counts.null_required_fields` | campos | `0` | sim | Campos obrigatorios nulos; ausente, invalido ou acima do limite rejeita. |
+| `exact_train_match_rate_max` | `evaluation.privacy.exact_train_match_rate` | taxa | `0.01` | sim | Match exato com treino sobre atributos de modelo; ausente, invalido ou acima do limite rejeita. |
+| `total_variation_distance_max` | maior TVD categorica contra holdout | distancia `[0, 1]` | `0.25` | nao | Deriva de distribuicoes categoricas; ausente, invalido ou acima do limite coloca em quarentena quando opcional. |
+| `correlation_difference_max` | maior diferenca absoluta de correlacao contra holdout | diferenca absoluta | `0.30` | nao | Deriva da matriz de correlacao numerica; ausente, invalido ou acima do limite coloca em quarentena quando opcional. |
 
-## ECA Digital
+Uso proibido:
 
-O Estatuto Digital da Criança e do Adolescente reforça a necessidade de proteção prioritária de crianças e adolescentes em ambientes digitais. Neste pipeline, a base de calibração usa faixa adulta, de 18 a 65 anos.
-
-Caso versões futuras gerem dados envolvendo menores de idade, recomenda-se criar salvaguardas específicas, justificativa técnica explícita e avaliação de risco reforçada.
-
-## Uso proibido
-
-Não use este projeto para:
-
-- fraude ou falsificação documental;
-- simulação de identidade real;
-- criação indevida de contas;
+- fraude ou falsificacao documental;
+- simulacao de identidade real;
+- criacao indevida de contas;
 - engenharia social;
-- tomada de decisão sobre pessoas;
-- treinamento de sistemas que busquem representar indivíduos reais.
-
-## Referências oficiais
-
-- Lei nº 13.709/2018 - LGPD: https://www.planalto.gov.br/ccivil_03/_Ato2015-2018/2018/Lei/L13709compilado.htm
-- Lei nº 15.211/2025 - Estatuto Digital da Criança e do Adolescente: https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2025/lei/l15211.htm
-- Decreto nº 12.880/2026: https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2026/Decreto/D12880.htm
-
+- interacao com servicos reais;
+- tomada de decisao sobre pessoas.

@@ -1,248 +1,219 @@
-# Geração de Dados Sintéticos com IA Generativa
+# Geracao de Perfis Sinteticos Brasileiros
 
-Repositório do projeto acadêmico **“Geração de Dados Sintéticos com IA Generativa: Inovação Segura e Governança Alinhadas à LGPD e ao ECA Digital”**.
+Pipeline experimental para gerar e avaliar perfis sinteticos brasileiros sem usar dados pessoais reais, sem consultar bases oficiais e sem validar documentos contra pessoas existentes.
 
-O projeto implementa um pipeline em Python para geração de perfis pessoais sintéticos brasileiros usando uma GAN tabular, geradores determinísticos de identificadores fictícios e validações estruturais. O objetivo é produzir dados coerentes para testes, homologação, pesquisa e experimentação, sem utilizar dados pessoais reais.
+O projeto agora compara tres estrategias:
 
-## Contexto Acadêmico
+- `programmatic`: baseline puramente programatico, baseado em regras probabilisticas controladas.
+- `simple_gan`: baseline neural preservado do projeto original. Ele e uma GAN tabular densa simples em Keras, nao uma CTGAN.
+- `ctgan`: CTGAN real usando a biblioteca standalone `ctgan>=0.12.1,<0.13`.
 
-Este repositório é um artefato de pesquisa/TCC e acompanha uma proposta voltada a:
+## Arquitetura
 
-- geração de perfis sintéticos brasileiros;
-- IA generativa aplicada a dados tabulares;
-- validações de formato e unicidade para identificadores fictícios;
-- rastreabilidade da execução;
-- reprodutibilidade por seed;
-- governança de dados, privacy by design e accountability;
-- discussão conceitual alinhada à LGPD e ao Estatuto Digital da Criança e do Adolescente.
+O pacote separa as responsabilidades principais:
 
-## Proposta
+- `calibration.py`: cria base de calibracao sintetica com dependencias semanticas e split treino/holdout.
+- `metadata.py`: schema, tipos, dominios, categorias e dependencias estruturais.
+- `generators/`: contexto de perfil, nomes, datas, telefone e documentos ficticios.
+- `models/`: interface comum `TabularSynthesizer`, baseline programatico, `SimpleTabularGAN` e `CTGANSynthesizer`.
+- `validators/`: validacao estrutural centralizada.
+- `evaluation/`: metricas estatisticas, relacionais, diversidade, privacidade e quality gates.
+- `pipeline.py`: orquestracao reutilizada pela CLI e notebook.
+- `artifacts.py` e `manifest.py`: versionamento, hashes e manifestos de execucao.
 
-O pipeline combina duas camadas:
+## Instalacao
 
-1. **Camada generativa tabular**: uma GAN aprende distribuições simples de uma base de calibração sintética, com atributos como idade, sexo e renda.
-2. **Camada determinística e validável**: após a geração, o projeto constrói campos finais como nome, data de nascimento, CPF, CNH, RG, título de eleitor e telefone, todos fictícios e voltados a uso controlado.
-
-Essa separação preserva a proposta científica: a GAN atua sobre a coerência estatística tabular, enquanto os identificadores são gerados por regras estruturais para evitar a aparência de dados coletados de pessoas reais.
-
-## Funcionalidades
-
-- Treinamento de uma GAN tabular com TensorFlow/Keras.
-- Geração de perfis sintéticos com campos brasileiros.
-- Geração de CPF com dígitos verificadores válidos.
-- Geração de RG, CNH, título de eleitor e telefone com estrutura plausível.
-- Validações de CPF, RG, telefone e duplicidades internas.
-- Exportação de dataset final e relatório JSON.
-- Registro de métricas de aceitação, rejeição, vazão e resumo univariado.
-- Reprodutibilidade por seed em Python, NumPy, TensorFlow e Faker.
-- Execução via notebook acadêmico ou script local.
-
-## Fluxo do Pipeline
-
-```text
-Base de calibração sintética
-        |
-        v
-Pré-processamento numérico
-        |
-        v
-Treinamento da GAN tabular
-        |
-        v
-Geração de candidatos sintéticos
-        |
-        v
-Filtro por domínio e score do discriminador
-        |
-        v
-Pós-processamento brasileiro
-        |
-        v
-Validações, relatório e exportação
-```
-
-## Tecnologias
-
-- Python 3.12 recomendado
-- TensorFlow/Keras
-- pandas
-- NumPy
-- scikit-learn
-- Faker
-- openpyxl
-
-## Estrutura do Repositório
-
-```text
-.
-├── README.md
-├── requirements.txt
-├── .gitignore
-├── notebooks/
-│   └── geracao_de_dados_pessoais_sinteticos_lgpd.ipynb
-├── src/
-│   └── synthetic_br_profiles_gan/
-│       ├── generators/
-│       ├── validators/
-│       ├── models/
-│       ├── reports/
-│       ├── utils/
-│       └── pipeline.py
-├── scripts/
-│   └── run_pipeline.py
-├── data/
-│   ├── samples/
-│   └── outputs/
-├── docs/
-│   ├── governance.md
-│   ├── methodology.md
-│   ├── outputs.md
-│   └── reproducibility.md
-└── tests/
-```
-
-## Instalação Local
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-Em Linux/macOS:
+Instalacao principal, sem backends neurais pesados:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
-O notebook foi pensado para Google Colab. Para execução local, Python 3.12 tende a ser a opção mais previsível por causa da compatibilidade com TensorFlow/Keras.
-
-## Execução
-
-Execução principal por script:
+Backends opcionais:
 
 ```bash
-python scripts/run_pipeline.py --n 1000 --seed 41 --output data/outputs
+pip install -e ".[simple-gan]"
+pip install -e ".[ctgan]"
+pip install -e ".[all-models]"
 ```
 
-Execução menor para teste rápido:
+## Calibracao
+
+A base de calibracao e sintetica e controlada. Ela inclui:
+
+- idade, genero, regiao, estado, municipio, DDD;
+- escolaridade, estado civil, ocupacao, renda e dependentes.
+
+As relacoes sao probabilisticas e reproduziveis por seed:
+
+- estado pertence a regiao;
+- municipio e DDD pertencem ao estado;
+- escolaridade depende de idade;
+- ocupacao depende de idade e escolaridade;
+- renda usa distribuicao assimetrica e depende de idade, escolaridade, ocupacao e regiao;
+- estado civil e dependentes dependem de idade e contexto familiar.
+
+Criar calibracao:
 
 ```bash
-python scripts/run_pipeline.py --n 100 --seed 41 --epochs 10 --calibration-size 2000 --output data/outputs
+python -m synthetic_br_profiles_gan create-calibration \
+  --config configs/calibration.yaml \
+  --output artifacts/calibration/demo
 ```
 
-Parâmetros úteis:
+## Treino
 
-- `--n`: quantidade final de registros.
-- `--seed`: seed de reprodutibilidade.
-- `--output`: diretório de saída.
-- `--epochs`: épocas de treinamento da GAN.
-- `--calibration-size`: tamanho da base de calibração.
-- `--reference-date`: data fixa para cálculo de datas de nascimento, no formato `YYYY-MM-DD`.
+Treinar a GAN densa simples:
 
-## Execução no Google Colab
+```bash
+python -m synthetic_br_profiles_gan train \
+  --model simple_gan \
+  --config configs/simple_gan.yaml \
+  --calibration artifacts/calibration/demo/train.parquet
+```
 
-O notebook principal está em:
+Treinar CTGAN real:
+
+```bash
+python -m synthetic_br_profiles_gan train \
+  --model ctgan \
+  --config configs/ctgan.yaml \
+  --calibration artifacts/calibration/demo/train.parquet
+```
+
+Na CTGAN, colunas categoricas e discretas sao declaradas explicitamente, incluindo `DDD`. Categorias nao sao tratadas como numeros continuos arredondados depois.
+Se um backend opcional nao estiver instalado, a CLI retorna erro controlado com o comando de instalacao esperado, por exemplo `pip install -e ".[ctgan]"`.
+
+## Geracao, Validacao e Avaliacao
+
+Gerar a partir de um modelo salvo:
+
+```bash
+python -m synthetic_br_profiles_gan generate \
+  --model programmatic \
+  --rows 1000 \
+  --config configs/pipeline.yaml
+```
+
+Validar um dataset final:
+
+```bash
+python -m synthetic_br_profiles_gan validate \
+  --input artifacts/runs/<run_id>/approved/dataset.parquet \
+  --config configs/pipeline.yaml
+```
+
+Avaliar contra uma referencia:
+
+```bash
+python -m synthetic_br_profiles_gan evaluate \
+  --reference artifacts/runs/<run_id>/approved/holdout.parquet \
+  --synthetic artifacts/runs/<run_id>/approved/dataset.parquet
+```
+
+Executar tudo:
+
+```bash
+python -m synthetic_br_profiles_gan pipeline \
+  --model programmatic \
+  --config configs/pipeline.yaml
+```
+
+Use `--require-approved` quando o comando deve retornar codigo diferente de zero se os quality gates nao aprovarem o resultado.
+
+## Metricas
+
+O relatorio compara sintetico contra treino e holdout separadamente.
+
+Metricas numericas incluem media, mediana, desvio-padrao, min/max, quantis, distancia de Wasserstein absoluta, distancia de Wasserstein normalizada pelo IQR da referencia com fallback para desvio-padrao, KS e diferencas absolutas/relativas.
+
+Metricas categoricas incluem frequencias, diferencas de proporcao, categorias ausentes/inesperadas e distancia de variacao total.
+
+Metricas relacionais incluem correlacoes Pearson/Spearman, diferencas entre matrizes, crosstabs de pares relevantes e renda por faixa etaria, escolaridade, regiao e ocupacao.
+
+Indicadores de diversidade e privacidade incluem duplicidade, match exato com treino/holdout, combinacoes unicas, cobertura de categorias, Distance to Closest Record e Nearest Neighbor Distance Ratio. Eles nao provam anonimizacao.
+
+## Quality Gates
+
+Os gates configuraveis ficam em `configs/quality_gates.yaml` e no bloco `quality_gates` de `configs/pipeline.yaml`.
+
+Modos de avaliacao:
+
+- `smoke`: verifica caminhos tecnicos com amostras pequenas. Falhas de tamanho minimo deixam o resultado em quarentena, mas nao sao evidencia estatistica.
+- `experimental`: modo padrao para comparacoes exploratorias. Mantem gates obrigatorios e sinaliza gates informativos como quarentena.
+- `approval`: exige amostra minima e rejeita metricas obrigatorias ausentes, invalidas ou `NaN`.
+
+Gates obrigatorios incluem linhas invalidas, identificadores duplicados, campos obrigatorios nulos e taxa de match exato com treino. Gates informativos padrao incluem distancia de variacao total categorica e diferenca de correlacao. Metricas obrigatorias ausentes ou nao finitas nao aprovam automaticamente a execucao.
+
+Estados possiveis:
+
+- `approved`: gates obrigatorios e opcionais passaram.
+- `quarantined`: gates obrigatorios passaram, mas algum gate opcional falhou.
+- `rejected`: gate obrigatorio falhou.
+
+Quando o status nao e aprovado, o dataset e os relatorios finais vao para `quarantine/` em vez de `approved/`. Com `--require-approved`, a CLI retorna codigo diferente de zero para `quarantined` ou `rejected`.
+
+## Artefatos
+
+Cada execucao usa `run_id` com timestamp UTC:
 
 ```text
-notebooks/geracao_de_dados_pessoais_sinteticos_lgpd.ipynb
+artifacts/
+  models/
+    <model>/
+      <run_id>/
+        model/
+  runs/
+    <run_id>/
+      approved/
+      quarantine/
+      manifest.json
+      config.yaml
 ```
 
-No Colab:
+Dentro de `approved/` ou `quarantine/` sao salvos:
 
-1. Abra o notebook pelo GitHub ou faça upload do arquivo.
-2. Ative GPU se disponível.
-3. Execute as células na ordem.
-4. Ao final, o notebook exporta `dados_sinteticos_realistas.xlsx` e `relatorio_execucao.json` em `data/outputs/`.
+- `dataset.parquet` como formato principal;
+- `dataset.xlsx` quando habilitado;
+- `validation.json`;
+- `evaluation.json`;
+- `quality_gates.json`;
+- `generation.json`;
+- `manifest.json`;
+- `metadata.json`;
+- `train.parquet` e `holdout.parquet`.
 
-O notebook foi preservado como artefato acadêmico. A pasta `src/` organiza a mesma lógica em módulos para execução local e testes.
+O manifesto registra run id, timestamp UTC, modelo, seed, quantidades, status, versoes de bibliotecas, plataforma, CPU/GPU quando o backend esta carregado, duracao, hash da configuracao, hashes dos artefatos e commit Git quando disponivel.
 
-## Saídas Geradas
+## Reprodutibilidade
 
-Por padrão, o script grava em `data/outputs/`:
+A seed e centralizada. O pipeline controla `random`, NumPy e, quando o modelo exige, TensorFlow ou PyTorch/CTGAN. Variaveis como `PYTHONHASHSEED` sao registradas, mas a documentacao do manifesto avisa quando foram alteradas depois do inicio do interpretador.
 
-- `dados_sinteticos_realistas.xlsx`: dataset final fictício.
-- `relatorio_execucao.json`: métricas, parâmetros e validações da execução.
+Operacoes neurais podem variar entre CPU, GPU, drivers e versoes de backend. Testes padrao evitam exigir igualdade bit a bit de TensorFlow ou CTGAN.
 
-Campos típicos do dataset:
+## Notebook
 
-- `Nome`
-- `Gênero`
-- `Data_Nascimento`
-- `CPF`
-- `CNH`
-- `RG`
-- `Titulo_Eleitor`
-- `Telefone`
-- `Renda`
-
-## Dados Sintéticos
-
-Os dados gerados por este projeto são fictícios. Eles não devem ser interpretados como registros de pessoas reais, nem usados para decisões operacionais sobre indivíduos.
-
-Importante: dados sintéticos **não devem ser automaticamente considerados anonimizados** sem avaliação de risco. Dependendo do método, do conjunto de origem e do contexto de uso, podem ser necessárias análises adicionais de privacidade, utilidade e risco de reidentificação.
-
-## Governança, LGPD e ECA Digital
-
-O projeto foi desenhado como demonstração de privacy by design:
-
-- não utiliza dados pessoais reais;
-- gera identificadores fictícios;
-- registra parâmetros e métricas da execução;
-- permite reprodutibilidade por seed;
-- separa dados gerados de documentação e código;
-- orienta uso apenas em ambientes controlados.
-
-A LGPD é considerada como referência conceitual para princípios como finalidade, adequação, necessidade, segurança, prevenção, responsabilização e prestação de contas. O ECA Digital é considerado no plano de governança por reforçar cuidado especial com crianças e adolescentes em ambientes digitais. Neste pipeline, a base sintética de calibração usa faixa adulta, de 18 a 65 anos.
-
-Referências normativas oficiais:
-
-- [Lei nº 13.709/2018 - LGPD](https://www.planalto.gov.br/ccivil_03/_Ato2015-2018/2018/Lei/L13709compilado.htm)
-- [Lei nº 15.211/2025 - Estatuto Digital da Criança e do Adolescente](https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2025/lei/l15211.htm)
-- [Decreto nº 12.880/2026 - regulamentação da Lei nº 15.211/2025](https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2026/Decreto/D12880.htm)
-
-## Aviso Ético e Jurídico
-
-Este projeto é destinado exclusivamente a pesquisa, testes, homologação e experimentação. Não utilize os dados gerados para fraude, falsificação documental, simulação de identidade real, criação de contas indevidas, engenharia social ou qualquer finalidade ilícita.
-
-Identificadores gerados, ainda que tenham formato válido, são fictícios e devem permanecer em ambientes controlados. O projeto não substitui avaliação jurídica, relatório de impacto, governança institucional ou auditoria de privacidade.
+O notebook em `notebooks/` importa o pacote e demonstra execucao, amostra, validacao, metricas e comparacao de modelos. Ele nao contem mais uma implementacao paralela do pipeline.
 
 ## Testes
-
-Os testes usam `unittest`:
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-Eles cobrem validação de CPF, formato de RG e telefone, unicidade e exportação de relatório em JSON.
+Os testes cobrem schema, calibracao, relacoes estado/regiao/municipio/DDD, data de nascimento, documentos, validadores, metricas, privacidade, quality gates, run ID, CLI, baseline programatico, reprodutibilidade e pipeline pequeno.
 
-## Reprodutibilidade
+## Limitacoes
 
-O script fixa seeds para Python, NumPy, TensorFlow e Faker. Para reproduzir também datas de nascimento, informe uma data de referência:
+- Documentos matematicamente validos nao sao consultados em bases reais.
+- O projeto nao garante que um numero valido nunca seja atribuido a uma pessoa real.
+- Os dados devem permanecer identificados como sinteticos.
+- Os dados nao devem ser usados para interagir com servicos reais.
+- Metricas de privacidade sao indicadores de risco, nao prova automatica de anonimizacao.
+- A calibracao programatica nao representa perfeitamente a populacao brasileira.
+- Qualidade estatistica nao significa veracidade individual.
+- A GAN antiga e uma GAN tabular densa simples; CTGAN so existe no modelo `ctgan`.
 
-```bash
-python scripts/run_pipeline.py --n 1000 --seed 41 --reference-date 2026-05-02 --output data/outputs
-```
+## Uso Responsavel
 
-Treinamentos neurais podem apresentar pequenas diferenças conforme versões de bibliotecas, hardware e backend. O relatório JSON registra parâmetros relevantes para rastreabilidade.
-
-## Limitações Conhecidas
-
-- A base de calibração é sintética e simplificada.
-- A GAN opera sobre poucos atributos tabulares.
-- As validações são estruturais e não equivalem a validação documental oficial.
-- O projeto não mede, por enquanto, risco formal de reidentificação.
-- O pipeline não deve ser usado para geração de identidades operacionais.
-- O notebook e o script podem produzir pequenas diferenças por ambiente.
-
-## Trabalhos Futuros
-
-- Adicionar métricas de utilidade estatística entre base de calibração e dados gerados.
-- Avaliar risco de privacidade com técnicas específicas para dados sintéticos.
-- Incluir testes automatizados para mais regras semânticas.
-- Documentar experimentos comparativos com outras técnicas de geração tabular.
-- Criar exemplos pequenos em `data/samples/` para demonstração pública.
-- Definir licença formal antes da publicação pública.
+Este projeto e destinado a pesquisa, testes, homologacao e experimentacao. Nao use os dados para fraude, falsificacao documental, criacao de contas indevidas, engenharia social, tomada de decisao sobre pessoas ou qualquer interacao com servicos reais.

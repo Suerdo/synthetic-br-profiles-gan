@@ -1,62 +1,41 @@
 # Metodologia
 
-Este documento descreve o fluxo técnico do pipeline de geração de dados pessoais sintéticos brasileiros.
+O pipeline e experimental, modular e mensuravel. Ele nao usa dados pessoais reais e nao consulta bases externas.
 
-## 1. Base de calibração
+## 1. Calibracao
 
-O projeto não usa dados pessoais reais. A base de calibração é gerada de forma sintética com três variáveis numéricas:
+A calibracao e gerada por regras probabilisticas locais. As colunas de modelo sao:
 
-- `Idade`: faixa adulta entre 18 e 65 anos.
-- `Sexo`: variável binária usada apenas na etapa tabular.
-- `Renda`: renda mensal simulada entre R$ 1.200 e R$ 25.000.
+- `Idade`, `Genero`, `Regiao`, `Estado`, `Municipio`, `DDD`;
+- `Escolaridade`, `Estado_Civil`, `Ocupacao`, `Renda`, `Dependentes`.
 
-Essa base serve como referência simples para o treinamento da GAN tabular.
+As dependencias estruturais sao explicitadas em `metadata.py` e testadas:
 
-## 2. Pré-processamento
+- `Estado` pertence a `Regiao`;
+- `Municipio` e `DDD` pertencem a `Estado`;
+- `Escolaridade` depende probabilisticamente de `Idade`;
+- `Ocupacao` depende de `Escolaridade` e `Idade`;
+- `Renda` usa distribuicao assimetrica e depende de idade, escolaridade, ocupacao e regiao;
+- `Estado_Civil` e `Dependentes` dependem de idade e estado civil.
 
-As variáveis numéricas são normalizadas coluna a coluna com `MinMaxScaler`, permitindo que a saída `sigmoid` do gerador opere no intervalo esperado.
+## 2. Split
 
-O objeto `DataPreprocessor` mantém os scalers ajustados e permite reverter amostras geradas para o espaço original.
+A calibracao e dividida em treino e holdout com seed configuravel. Modelos treinaveis usam somente treino. A avaliacao compara o sintetico contra treino e holdout separadamente.
 
-## 3. GAN tabular
+## 3. Modelos
 
-A arquitetura preserva a proposta do notebook:
+- `ProgrammaticSynthesizer`: baseline programatico.
+- `SimpleTabularGAN`: GAN tabular densa simples preservada do projeto original.
+- `CTGANSynthesizer`: CTGAN real via biblioteca standalone `ctgan`.
 
-- gerador com camadas densas e saída `sigmoid`;
-- discriminador binário com camadas densas;
-- treinamento alternado entre discriminador e gerador;
-- uso de ruído latente com dimensão configurável.
+## 4. Pos-processamento
 
-O objetivo é gerar candidatos tabulares coerentes antes do pós-processamento brasileiro.
+As saidas do modelo viram `SyntheticProfileContext`. A partir desse contexto sao derivados nome, data de nascimento, telefone e identificadores ficticios. A data de nascimento e sorteada dentro do intervalo que produz exatamente a idade informada na data de referencia.
 
-## 4. Seleção de candidatos
+## 5. Validacao e avaliacao
 
-Após a geração, cada candidato passa por:
+A selecao de linhas usa schema, tipos, dominios, regras semanticas, documentos matematicamente validos e duplicidade. O discriminador da GAN simples nao e usado como probabilidade calibrada nem como filtro principal.
 
-- regras de domínio para idade, sexo e renda;
-- score mínimo do discriminador;
-- contagem de candidatos aceitos e rejeitados.
+As metricas estatisticas, relacionais, diversidade, privacidade e quality gates sao calculadas em modulos independentes dos modelos. Distancias de vizinhanca, DCR, NNDR e matches exatos usam os atributos de modelo; identificadores derivados como CPF, RG, CNH, titulo, telefone, nome e data de nascimento ficam fora das metricas de proximidade.
 
-Essas métricas são gravadas no relatório de execução.
-
-## 5. Pós-processamento brasileiro
-
-Os candidatos aceitos são transformados no dataset final:
-
-- `Sexo` é convertido para `Gênero`;
-- `Data_Nascimento` é derivada da idade;
-- `Nome` é gerado com Faker em `pt_BR`;
-- CPF, CNH, RG, título de eleitor e telefone são gerados por funções determinísticas/fictícias;
-- a coluna `Idade` é removida da exportação final.
-
-## 6. Validações finais
-
-O dataset final é avaliado por:
-
-- formato de CPF, RG e telefone;
-- dígitos verificadores de CPF;
-- duplicidades internas de CPF, CNH, RG, título de eleitor e telefone;
-- taxa aproximada de conformidade.
-
-As validações são estruturais. Elas não equivalem a consulta oficial, validação documental governamental ou garantia de inexistência no mundo real.
-
+Distancias de Wasserstein sao registradas em escala absoluta e tambem normalizadas pelo IQR da referencia, com fallback para desvio-padrao quando o IQR e zero. Essa normalizacao facilita comparar variaveis em escalas diferentes sem remover a metrica absoluta.

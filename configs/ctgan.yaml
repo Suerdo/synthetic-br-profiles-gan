@@ -1,0 +1,10 @@
+seed: 41
+epochs: 300
+batch_size: 500
+verbose: false
+enable_gpu: false
+cuda: null
+library:
+  name: ctgan
+  version: ">=0.12.1,<0.13"
+  note: "Standalone CTGAN package; categorical and discrete columns are passed explicitly to CTGAN.fit."

@@ -10,6 +10,8 @@ import pandas as pd
 CPF_FORMAT_RE = re.compile(r"^\d{3}\.\d{3}\.\d{3}-\d{2}$")
 RG_FORMAT_RE = re.compile(r"^\d{2}\.\d{3}\.\d{3}-\d$")
 PHONE_FORMAT_RE = re.compile(r"^\(\d{2}\) \d{5}-\d{4}$")
+CNH_FORMAT_RE = re.compile(r"^\d{11}$")
+TITULO_ELEITOR_FORMAT_RE = re.compile(r"^\d{4} \d{4} \d{2} \d{2}$")
 
 
 def somente_digitos(valor: object) -> str:
@@ -48,6 +50,46 @@ def validar_telefone(valor: object) -> bool:
     return bool(PHONE_FORMAT_RE.match(str(valor)))
 
 
+def extrair_ddd(valor: object) -> int | None:
+    """Extrai o DDD de um telefone no formato do projeto."""
+    match = PHONE_FORMAT_RE.match(str(valor))
+    if not match:
+        return None
+    return int(str(valor)[1:3])
+
+
+def validar_cnh(valor: object) -> bool:
+    """Valida a CNH conforme a regra local usada pelo gerador."""
+    cnh = somente_digitos(valor)
+    if not CNH_FORMAT_RE.match(cnh):
+        return False
+    number = [int(digit) for digit in cnh[:9]]
+    total = sum((9 - index) * number[index] for index in range(9))
+    digit_1 = total % 11
+    digit_1 = 0 if digit_1 >= 10 else digit_1
+
+    total = sum((index + 1) * number[index] for index in range(9))
+    digit_2 = total % 11
+    digit_2 = 0 if digit_2 >= 10 else digit_2
+    return cnh[-2:] == f"{digit_1}{digit_2}"
+
+
+def validar_titulo_eleitor(valor: object) -> bool:
+    """Valida o titulo de eleitor conforme a regra local usada pelo gerador."""
+    text = str(valor)
+    if not TITULO_ELEITOR_FORMAT_RE.match(text):
+        return False
+    digits = somente_digitos(text)
+    number = digits[:8]
+    uf_code = digits[8:10]
+    digit_1 = sum(int(number[index]) * (9 - index) for index in range(8)) % 11
+    digit_1 = 0 if digit_1 == 10 else digit_1
+    digit_2 = sum(int(number[index]) * (8 - index) for index in range(8)) + digit_1 * 9 + int(uf_code) * 10
+    digit_2 = digit_2 % 11
+    digit_2 = 0 if digit_2 == 10 else digit_2
+    return digits[-2:] == f"{digit_1}{digit_2}"
+
+
 def checar_unicidade(df: pd.DataFrame, colunas: Iterable[str]) -> dict[str, int]:
     """Conta duplicidades internas nas colunas informadas."""
     duplicidades: dict[str, int] = {}
@@ -69,6 +111,8 @@ def avaliar_regras_final(df: pd.DataFrame) -> dict:
     contagens = {
         "cpf_formato_invalido": _contar_invalidos(df, "CPF", validar_formato_cpf),
         "cpf_digito_invalido": _contar_invalidos(df, "CPF", validar_cpf),
+        "cnh_digito_invalido": _contar_invalidos(df, "CNH", validar_cnh),
+        "titulo_digito_invalido": _contar_invalidos(df, "Titulo_Eleitor", validar_titulo_eleitor),
         "rg_formato_invalido": _contar_invalidos(df, "RG", validar_formato_rg),
         "tel_formato_invalido": _contar_invalidos(df, "Telefone", validar_telefone),
     }

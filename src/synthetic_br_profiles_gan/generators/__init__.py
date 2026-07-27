@@ -1,6 +1,7 @@
 """Geradores de atributos sinteticos brasileiros."""
 
 from synthetic_br_profiles_gan.generators.demographics import (
+    calcular_idade,
     criar_faker,
     finalizar_perfis_sinteticos,
     gerar_data_nascimento_por_idade,
@@ -9,6 +10,7 @@ from synthetic_br_profiles_gan.generators.demographics import (
     gerar_pessoa_base,
     gerar_renda,
 )
+from synthetic_br_profiles_gan.generators.context import SyntheticProfileContext
 from synthetic_br_profiles_gan.generators.identifiers import (
     gerar_cnh,
     gerar_cpf,
@@ -18,6 +20,8 @@ from synthetic_br_profiles_gan.generators.identifiers import (
 )
 
 __all__ = [
+    "SyntheticProfileContext",
+    "calcular_idade",
     "criar_faker",
     "finalizar_perfis_sinteticos",
     "gerar_cnh",

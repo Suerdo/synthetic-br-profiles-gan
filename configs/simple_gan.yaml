@@ -1,0 +1,8 @@
+seed: 41
+latent_dim: 16
+epochs: 100
+batch_size: 64
+learning_rate: 0.0001
+beta_1: 0.5
+verbose_every: 10
+metrics_every: 10

@@ -1,0 +1,16 @@
+numeric_quantiles:
+  - 0.05
+  - 0.25
+  - 0.5
+  - 0.75
+  - 0.95
+privacy:
+  max_nearest_neighbor_rows: 1000
+  exclude_columns:
+    - Nome
+    - Data_Nascimento
+    - CPF
+    - CNH
+    - RG
+    - Titulo_Eleitor
+    - Telefone
