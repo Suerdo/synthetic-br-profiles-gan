@@ -598,13 +598,13 @@ def run_capacity_subprocess(
     with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open("w", encoding="utf-8") as stderr_file:
         process = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file, text=True)
         while True:
+            if process.poll() is not None:
+                break
             memory = _process_tree_rss_mb(process.pid)
             if memory is not None:
                 if memory_initial is None:
                     memory_initial = memory
                 memory_peak = max(memory_peak or memory, memory)
-            if process.poll() is not None:
-                break
             elapsed = time.perf_counter() - started
             max_total = _limit_value(limits.get("max_total_seconds_per_run"))
             max_memory = _limit_value(limits.get("max_peak_memory_mb"))
@@ -623,7 +623,9 @@ def run_capacity_subprocess(
                 _terminate_process_tree(process)
                 break
             time.sleep(float(poll_interval_seconds))
-        exit_code = process.wait()
+        exit_code = process.returncode
+        if exit_code is None:
+            exit_code = process.wait()
     duration = float(time.perf_counter() - started)
     if memory_peak is None:
         memory_peak = memory_initial
@@ -657,32 +659,48 @@ def _process_tree_rss_mb(pid: int) -> float | None:
 
 
 def _terminate_process_tree(process: subprocess.Popen) -> None:
+    children = []
     try:
         import psutil
 
-        parent = psutil.Process(process.pid)
-        children = parent.children(recursive=True)
+        try:
+            parent = psutil.Process(process.pid)
+            children = parent.children(recursive=True)
+        except psutil.Error:
+            children = []
         for child in children:
             try:
                 child.terminate()
             except psutil.Error:
                 continue
-        try:
-            parent.terminate()
-        except psutil.Error:
-            pass
-        gone, alive = psutil.wait_procs([parent, *children], timeout=5)
-        for item in alive:
+        _terminate_parent_with_popen(process)
+        _, alive = psutil.wait_procs(children, timeout=5)
+        for child in alive:
             try:
-                item.kill()
+                child.kill()
             except psutil.Error:
                 continue
+        if alive:
+            psutil.wait_procs(alive, timeout=5)
     except Exception:
-        process.terminate()
+        _terminate_parent_with_popen(process)
+
+
+def _terminate_parent_with_popen(process: subprocess.Popen) -> None:
+    if process.poll() is None:
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+            process.terminate()
+        except (ProcessLookupError, OSError):
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except (ProcessLookupError, OSError):
+                pass
+        process.wait(timeout=5)
 
 
 def _limit_value(value: Any) -> float | None:

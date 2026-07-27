@@ -6,7 +6,7 @@ import tempfile
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -18,6 +18,7 @@ if str(SRC) not in sys.path:
 from synthetic_br_profiles_gan.benchmark import (
     DEFAULT_BENCHMARK_CONFIG,
     _capacity_row_from_worker_payload,
+    _terminate_process_tree,
     aggregate_summary_by_model_and_size,
     aggregate_summary_by_model,
     benchmark_matrix,
@@ -648,6 +649,40 @@ class BenchmarkTest(unittest.TestCase):
             self.assertFalse(execution["resource_limited"])
             self.assertFalse(execution["timed_out"])
             self.assertIsNone(execution["limit_reason"])
+
+    def test_terminate_process_tree_waits_only_child_processes_with_psutil(self) -> None:
+        class FakePsutilError(Exception):
+            pass
+
+        parent = Mock(name="parent")
+        child_one = Mock(name="child_one")
+        child_two = Mock(name="child_two")
+        parent.children.return_value = [child_one, child_two]
+        wait_calls = []
+
+        fake_psutil = Mock()
+        fake_psutil.Error = FakePsutilError
+        fake_psutil.Process.return_value = parent
+
+        def wait_procs(processes, timeout):
+            wait_calls.append(list(processes))
+            return list(processes), []
+
+        fake_psutil.wait_procs.side_effect = wait_procs
+        process = Mock()
+        process.pid = 123
+        process.poll.return_value = None
+
+        with patch.dict(sys.modules, {"psutil": fake_psutil}):
+            _terminate_process_tree(process)
+
+        child_one.terminate.assert_called_once()
+        child_two.terminate.assert_called_once()
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=5)
+        self.assertEqual(len(wait_calls), 1)
+        self.assertEqual(wait_calls[0], [child_one, child_two])
+        self.assertTrue(all(parent is not item for call in wait_calls for item in call))
 
     def test_capacity_missing_worker_result_becomes_failed_row(self) -> None:
         row = _capacity_row_from_worker_payload(
