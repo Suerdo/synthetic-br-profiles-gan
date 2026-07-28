@@ -385,6 +385,26 @@ A seleção de colunas altera apenas a projeção exportada. Com a mesma seed, q
 
 O notebook em `notebooks/` importa o pacote e demonstra execução, amostra, validação, métricas e comparação de modelos. Ele não contém mais uma implementação paralela do pipeline.
 
+## Interface Streamlit
+
+A primeira versão da interface Streamlit permite gerar dados sintéticos sem duplicar as regras de negócio do pacote. A página reutiliza `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação e manifestos.
+
+Instalar o extra opcional:
+
+```bash
+pip install -e ".[ui]"
+```
+
+Iniciar a aplicação:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+A interface permite escolher modelo, quantidade de registros, seed, formato de saída e colunas exportadas. O modelo programático fica disponível diretamente. `ctgan` e `simple_gan` só aparecem como opções geráveis quando há artefatos válidos em `artifacts/models`.
+
+A seleção de colunas é aplicada somente depois da geração interna das 18 colunas finais e da validação estrutural completa. A interface não permite upload de modelos nem caminhos arbitrários para artefatos serializados. Consulte `docs/interface.md` para detalhes de instalação, telas, governança, diretórios temporários e limitações.
+
 ## Testes
 
 ```bash

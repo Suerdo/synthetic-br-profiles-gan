@@ -23,6 +23,7 @@ dependencies = [
 simple-gan = ["tensorflow>=2.16"]
 ctgan = ["ctgan>=0.12.1,<0.13"]
 all-models = ["tensorflow>=2.16", "ctgan>=0.12.1,<0.13"]
+ui = ["streamlit>=1.37"]
 test = ["pytest>=8.0"]
 
 [project.scripts]

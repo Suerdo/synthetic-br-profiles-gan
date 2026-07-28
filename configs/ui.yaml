@@ -1,0 +1,19 @@
+application:
+  title: "Gerador de Perfis Sintéticos Brasileiros"
+  preview_rows: 20
+  models_root: "artifacts/models"
+  sessions_root: "artifacts/ui_sessions"
+
+generation:
+  default_rows: 1000
+  min_rows: 1
+  limits:
+    programmatic: 100000
+    ctgan: 50000
+    simple_gan: 20000
+
+defaults:
+  model: programmatic
+  preset: completo
+  format: csv
+  seed: 41

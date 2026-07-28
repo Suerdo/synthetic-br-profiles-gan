@@ -42,6 +42,22 @@ class LoadedSynthesizer:
     manifest: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class SavedModelArtifact:
+    """Resumo de um artefato de modelo salvo e validado por manifesto."""
+
+    model: str
+    artifact_id: str
+    artifact_path: Path
+    created_at_utc: str | None
+    train_rows: int | None
+    seed: int | None
+    schema_version: int
+    training_required: bool
+    model_size_bytes: int | None
+    manifest: dict[str, Any]
+
+
 def load_training_manifest(model_path: str | Path) -> dict[str, Any]:
     """Carrega e valida o manifesto de treinamento de um artefato de modelo."""
     artifact_path = Path(model_path)
@@ -68,6 +84,45 @@ def load_training_manifest(model_path: str | Path) -> dict[str, Any]:
     if list(manifest.get("final_columns", [])) != metadata.final_columns:
         raise ModelSerializationError("Model artifact final_columns are incompatible with the current schema.")
     return manifest
+
+
+def list_saved_model_artifacts(models_root: str | Path, model: str | None = None) -> list[SavedModelArtifact]:
+    """Lista artefatos válidos dentro do diretório administrado de modelos."""
+    root = Path(models_root)
+    if not root.exists() or not root.is_dir():
+        return []
+    root_resolved = root.resolve()
+    requested_model = model.lower().replace("-", "_") if model else None
+    artifacts: list[SavedModelArtifact] = []
+    for manifest_path in sorted(root.rglob("training_manifest.json")):
+        artifact_path = manifest_path.parent
+        try:
+            resolved_artifact = artifact_path.resolve()
+            if not resolved_artifact.is_relative_to(root_resolved):
+                continue
+            manifest = load_training_manifest(artifact_path)
+            artifact_model = str(manifest["model"])
+            if requested_model is not None and artifact_model != requested_model:
+                continue
+            validate_required_model_files(artifact_path, artifact_model)
+        except ModelSerializationError:
+            continue
+        artifacts.append(
+            SavedModelArtifact(
+                model=artifact_model,
+                artifact_id=_artifact_id(root_resolved, resolved_artifact),
+                artifact_path=resolved_artifact,
+                created_at_utc=manifest.get("created_at_utc"),
+                train_rows=_optional_int(manifest.get("train_rows")),
+                seed=_optional_int(manifest.get("seed")),
+                schema_version=int(manifest.get("schema_version", 0)),
+                training_required=bool(manifest.get("training_required", artifact_model != "programmatic")),
+                model_size_bytes=_optional_int(manifest.get("model_size_bytes")),
+                manifest=manifest,
+            )
+        )
+    artifacts.sort(key=lambda item: (item.model, item.created_at_utc or "", item.artifact_id))
+    return artifacts
 
 
 def validate_required_model_files(model_path: str | Path, model: str) -> None:
@@ -99,3 +154,19 @@ def load_saved_synthesizer(model_path: str | Path, expected_model: str | None = 
     else:
         raise ModelSerializationError(f"Unsupported saved model: {model}")
     return LoadedSynthesizer(model=model, synthesizer=synthesizer, artifact_path=artifact_path, manifest=manifest)
+
+
+def _artifact_id(root: Path, artifact_path: Path) -> str:
+    try:
+        return str(artifact_path.relative_to(root))
+    except ValueError:
+        return artifact_path.name
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
