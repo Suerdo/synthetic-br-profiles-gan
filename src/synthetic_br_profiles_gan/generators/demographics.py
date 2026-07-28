@@ -26,6 +26,8 @@ from synthetic_br_profiles_gan.generators.identifiers import (
 from synthetic_br_profiles_gan.localization import normalize_text_frame
 from synthetic_br_profiles_gan.metadata import FINAL_COLUMNS, MODEL_COLUMNS
 
+IDENTIFIER_COLUMNS = ("CPF", "CNH", "RG", "Titulo_Eleitor", "Telefone")
+
 
 def criar_faker(seed: int | None = None) -> Faker:
     """Cria uma instância pt_BR do Faker com seed determinística opcional."""
@@ -160,24 +162,35 @@ def _unique_value(generator, used: set[str], max_attempts: int = 1000) -> str:
     raise RuntimeError("Could not generate a unique synthetic value within max_attempts.")
 
 
+def criar_estado_identificadores() -> dict[str, set[str]]:
+    """Cria conjuntos vazios para controlar identificadores em uma geração completa."""
+    return {column: set() for column in IDENTIFIER_COLUMNS}
+
+
+def _resolve_used_identifiers(used_identifiers: dict[str, set[str]] | None) -> dict[str, set[str]]:
+    if used_identifiers is None:
+        return criar_estado_identificadores()
+    missing = [column for column in IDENTIFIER_COLUMNS if column not in used_identifiers]
+    if missing:
+        raise ValueError(f"used_identifiers must contain keys: {', '.join(IDENTIFIER_COLUMNS)}.")
+    for column in IDENTIFIER_COLUMNS:
+        if not isinstance(used_identifiers[column], set):
+            raise TypeError(f"used_identifiers[{column!r}] must be a set.")
+    return used_identifiers
+
+
 def finalizar_perfis_sinteticos(
     df: pd.DataFrame,
     fake: Faker,
     referencia: datetime | date | None = None,
     rng: random.Random | None = None,
     date_format: str = "%Y-%m-%d",
+    used_identifiers: dict[str, set[str]] | None = None,
 ) -> pd.DataFrame:
     """Adiciona campos derivados e identificadores contextuais às linhas do modelo."""
     random_source = rng if rng is not None else random
     normalized = _normalize_model_frame(df, random_source).reset_index(drop=True)
-
-    used: dict[str, set[str]] = {
-        "CPF": set(),
-        "CNH": set(),
-        "RG": set(),
-        "Titulo_Eleitor": set(),
-        "Telefone": set(),
-    }
+    used = _resolve_used_identifiers(used_identifiers)
     rows: list[dict[str, Any]] = []
     for _, row in normalized.iterrows():
         context = SyntheticProfileContext.from_mapping(row)

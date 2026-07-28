@@ -72,9 +72,13 @@ As saídas do modelo viram `SyntheticProfileContext`. A partir desse contexto, s
 
 Antes da validação e da exportação, valores textuais finais passam por normalização Unicode NFC e por aliases explícitos de compatibilidade com o vocabulário legado. A normalização não remove acentos nem translitera os dados para ASCII.
 
+Identificadores sintéticos como `CPF`, `CNH`, `RG`, `Titulo_Eleitor` e `Telefone` são controlados por um estado de unicidade criado para a geração completa. Esse estado é compartilhado entre batches da mesma execução e não é global ao módulo, ao processo, à interface ou a outros usuários. Assim, a unicidade vale para todo o dataset gerado, preservando o comportamento independente de chamadas isoladas de `finalizar_perfis_sinteticos`.
+
 ## 8. Validação e avaliação
 
 A seleção de linhas usa schema, tipos, domínios, regras semânticas, documentos matematicamente válidos e duplicidade. O discriminador da GAN simples não é usado como probabilidade calibrada nem como filtro principal.
+
+Quando a geração ocorre em batches, cada lote é validado para diagnóstico, mas a seleção final usa a máscara da validação global sobre todos os candidatos acumulados. Essa regra impede que uma linha válida isoladamente em um lote seja selecionada caso viole uma restrição global, como identificador duplicado entre batches ou linha completa duplicada.
 
 As métricas estatísticas, relacionais, de diversidade, de privacidade e quality gates são calculadas em módulos independentes dos modelos. Distâncias de vizinhança, DCR, NNDR e matches exatos usam os atributos de modelo; identificadores derivados como CPF, RG, CNH, título, telefone, nome e data de nascimento ficam fora das métricas de proximidade.
 

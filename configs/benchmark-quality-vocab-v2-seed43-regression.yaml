@@ -1,0 +1,113 @@
+benchmark:
+  name: quality-vocab-v2-seed43-regression
+  type: vocabulary_quality
+  models:
+    - programmatic
+    - simple_gan
+    - ctgan
+  seeds:
+    - 43
+  train_sizes:
+    - 20000
+  synthetic_rows: 20000
+  holdout_fraction: 0.20
+  assessment_mode: experimental
+  continue_on_error: true
+  reference_date: "2026-07-26"
+
+calibration:
+  income:
+    min: 800.0
+    max: 50000.0
+  age:
+    min: 18
+    max: 85
+  region_weights:
+    Norte: 0.09
+    Nordeste: 0.27
+    Centro-Oeste: 0.08
+    Sudeste: 0.42
+    Sul: 0.14
+
+models:
+  programmatic: {}
+
+  simple_gan:
+    epochs: 20
+    batch_size: 128
+    latent_dim: 32
+    learning_rate: 0.0001
+    beta_1: 0.5
+    verbose_every: 0
+    metrics_every: 0
+
+  ctgan:
+    epochs: 20
+    batch_size: 500
+    verbose: false
+    enable_gpu: false
+    cuda: null
+
+generation:
+  batch_size: 4096
+  max_batches: 30
+  date_format: "%Y-%m-%d"
+
+evaluation:
+  privacy:
+    max_nearest_neighbor_rows: 1000
+    exclude_columns:
+      - Nome
+      - Data_Nascimento
+      - CPF
+      - CNH
+      - RG
+      - Titulo_Eleitor
+      - Telefone
+
+quality_gates:
+  min_evaluation_rows: 100
+  invalid_rows_max:
+    value: 0
+    mandatory: true
+  duplicated_identifier_max:
+    value: 0
+    mandatory: true
+  null_required_fields_max:
+    value: 0
+    mandatory: true
+  exact_train_match_rate_max:
+    value: 0.01
+    mandatory: true
+  total_variation_distance_max:
+    value: 0.25
+    mandatory: false
+  correlation_difference_max:
+    value: 0.3
+    mandatory: false
+
+vocabulary_quality:
+  rare_occupation_threshold: 0.01
+  minimum_income_group_count: 20
+  low_count_threshold: 10
+
+outputs:
+  base_directory: artifacts/benchmarks
+  export_csv: true
+  export_parquet: true
+  export_json: true
+  export_individual_xlsx: false
+
+execution:
+  parallelism: 1
+  warmup_backends: true
+  rotate_model_order_by_seed: false
+
+resource_limits:
+  max_training_seconds_per_run: null
+  max_total_seconds_per_run: null
+  max_peak_memory_mb: null
+  stop_larger_sizes_after_resource_failure: true
+
+ranking:
+  enabled: false

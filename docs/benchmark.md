@@ -555,6 +555,87 @@ Status observados:
 
 As rejeições de `programmatic`, `ctgan` e `simple_gan` na seed `43` foram causadas por quality gates obrigatórios (`invalid_rows_max` e `duplicated_identifier_max`) com uma linha inválida ou identificador duplicado. Não houve falhas técnicas no benchmark principal; `failures.json` permaneceu vazio.
 
+### Correção da unicidade entre batches
+
+A execução original da seed `43` revelou um defeito na garantia de unicidade entre lotes. O problema estava na etapa compartilhada de pós-processamento e seleção, não nos sintetizadores individualmente.
+
+O diagnóstico isolado foi executado com `configs/benchmark-quality-vocab-v2-seed43-debug.yaml`, usando apenas `programmatic`, seed `43`, 20.000 registros de treinamento, 5.000 registros de holdout, 25.000 registros de calibração total, 20.000 registros sintéticos solicitados e `batch_size: 4096`.
+
+Execução diagnóstica original:
+
+- `benchmark_id`: `quality-vocab-v2-seed43-debug-20260728T161102Z-0efe1fcc`;
+- `run_id`: `20260728T161111Z-66910641`;
+- status: `rejected`;
+- `invalid_rows`: `1`;
+- `duplicated_identifier`: `1`;
+- motivo estrutural: `CPF_duplicado`;
+- artefato diagnóstico: `artifacts/runs/20260728T161111Z-66910641/quarantine/seed43_duplicate_diagnostic.json`.
+
+O identificador afetado foi `CPF`. O valor foi registrado no diagnóstico apenas em forma mascarada e por SHA-256:
+
+- valor mascarado: `***.***.***-04`;
+- SHA-256: `e0944332c9e751272da37d171622adc172c2d5974b9cf5337bb3ff2e824924ab`;
+- ocorrências: índice global `7764`, batch `1`, posição `3668`; índice global `9991`, batch `2`, posição `1799`;
+- tipo de colisão: entre batches diferentes, não dentro do mesmo batch.
+
+A comparação das máscaras confirmou a causa raiz:
+
+| Métrica | Valor |
+| --- | ---: |
+| Máscara válida por batch | 20.480 |
+| Máscara concatenada por batch | 20.480 |
+| Máscara válida global | 20.479 |
+| Selecionados | 20.000 |
+| Índice válido por batch e inválido globalmente | `9991` |
+
+Antes da correção, `finalizar_perfis_sinteticos` criava conjuntos locais de identificadores a cada chamada. Como `generate_profiles` chamava o pós-processamento uma vez por batch, a unicidade de `CPF`, `CNH`, `RG`, `Titulo_Eleitor` e `Telefone` era garantida apenas dentro do lote. Além disso, a seleção final usava a máscara válida por batch, embora a validação global já detectasse a colisão.
+
+A correção aplicada passou a:
+
+- criar um estado de identificadores uma única vez por geração;
+- passar esse estado compartilhado para todos os batches de `finalizar_perfis_sinteticos`;
+- preservar o comportamento antigo quando `finalizar_perfis_sinteticos` é chamada sem estado externo;
+- validar a presença das cinco chaves esperadas no estado;
+- selecionar registros com base em `full_validation.valid_mask`, isto é, a máscara da validação global;
+- continuar gerando batches até obter a quantidade solicitada de registros globalmente válidos ou falhar claramente ao esgotar `max_batches`;
+- registrar contadores separados para aceitação por batch e por regras globais.
+
+Contadores adicionados ao accounting da geração:
+
+- `accepted_by_batch_rules`;
+- `accepted_by_global_rules`;
+- `rejected_by_batch_rules`;
+- `rejected_by_global_rules`;
+- `batch_acceptance_rate`;
+- `global_acceptance_rate`;
+- `per_batch_valid_mask_count`;
+- `concatenated_valid_mask_count`;
+- `global_valid_mask_count`;
+- `global_mask_disagreeing_count`;
+- `global_mask_disagreeing_indices`;
+- `cross_batch_identifier_duplicates`.
+
+Após a correção, o diagnóstico programático foi repetido somente com a seed `43`:
+
+- `benchmark_id`: `quality-vocab-v2-seed43-debug-20260728T161746Z-8ba0ba62`;
+- `run_id`: `20260728T161750Z-5bbf24b9`;
+- status: `approved`;
+- `selected`: `20.000`;
+- `invalid_rows`: `0`;
+- `duplicated_identifier`: `0`;
+- `cross_batch_identifier_duplicates`: `0`;
+- `global_mask_disagreeing_count`: `0`.
+
+Depois, a regressão restrita à seed `43` foi executada com `configs/benchmark-quality-vocab-v2-seed43-regression.yaml`, mantendo os três modelos e os hiperparâmetros do benchmark principal:
+
+| Modelo | Status após correção | Linhas válidas | Identificador duplicado | Observação |
+| --- | --- | ---: | ---: | --- |
+| `programmatic` | `approved` | 20.000 | 0 | Defeito compartilhado removido |
+| `ctgan` | `approved` | 20.000 | 0 | Defeito compartilhado removido |
+| `simple_gan` | `quarantined` | 20.000 | 0 | Quarentena mantida por TVD e correlação, não por identificadores |
+
+As conclusões anteriores sobre cobertura do vocabulário, categorias raras, diversidade e comparação `raw` versus `final` permanecem válidas como registro da execução original. A interpretação dos quality gates da seed `43` foi refinada: a rejeição por identificador duplicado não deve ser atribuída aos modelos, mas ao caminho compartilhado de pós-processamento e seleção existente naquela execução.
+
 Artefatos específicos gerados em `artifacts/benchmarks/quality-vocab-v2-20260728T131154Z-364a35cb/`:
 
 - `vocabulary_v2_metrics.csv` e `vocabulary_v2_metrics.parquet`;

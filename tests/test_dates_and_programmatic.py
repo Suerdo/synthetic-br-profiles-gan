@@ -4,6 +4,7 @@ import random
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -15,6 +16,7 @@ import pandas as pd
 from synthetic_br_profiles_gan.calibration import generate_calibration_dataset
 from synthetic_br_profiles_gan.generators.demographics import (
     calcular_idade,
+    criar_estado_identificadores,
     criar_faker,
     finalizar_perfis_sinteticos,
     gerar_data_nascimento_por_idade,
@@ -59,6 +61,45 @@ class DatesAndProgrammaticTest(unittest.TestCase):
         report = validate_profile_dataframe(final, metadata=metadata, reference_date="2026-07-26").report
         self.assertEqual(report["invalid_rows"], 0)
         self.assertTrue(report["is_valid"])
+
+    def test_shared_identifier_state_retries_across_calls(self) -> None:
+        core = generate_calibration_dataset(1, seed=11)
+        used_identifiers = criar_estado_identificadores()
+        cpf_a = "291.417.776-38"
+        cpf_b = "011.524.493-03"
+        calls = iter([cpf_a, cpf_a, cpf_b])
+
+        with patch("synthetic_br_profiles_gan.generators.demographics.gerar_cpf", side_effect=lambda rng: next(calls)):
+            first = finalizar_perfis_sinteticos(
+                core,
+                fake=criar_faker(11),
+                referencia=pd.Timestamp("2026-07-26").to_pydatetime(),
+                rng=random.Random(11),
+                used_identifiers=used_identifiers,
+            )
+            second = finalizar_perfis_sinteticos(
+                core,
+                fake=criar_faker(12),
+                referencia=pd.Timestamp("2026-07-26").to_pydatetime(),
+                rng=random.Random(12),
+                used_identifiers=used_identifiers,
+            )
+
+        self.assertEqual(first.loc[0, "CPF"], cpf_a)
+        self.assertEqual(second.loc[0, "CPF"], cpf_b)
+        self.assertEqual(used_identifiers["CPF"], {cpf_a, cpf_b})
+
+    def test_finalizer_without_shared_identifier_state_remains_compatible(self) -> None:
+        core = generate_calibration_dataset(3, seed=13)
+        final = finalizar_perfis_sinteticos(
+            core,
+            fake=criar_faker(13),
+            referencia=pd.Timestamp("2026-07-26").to_pydatetime(),
+            rng=random.Random(13),
+        )
+
+        self.assertEqual(list(final.columns), default_metadata().final_columns)
+        self.assertEqual(len(final), 3)
 
 
 if __name__ == "__main__":

@@ -36,7 +36,12 @@ from synthetic_br_profiles_gan.evaluation.metrics import evaluate_synthetic_data
 from synthetic_br_profiles_gan.evaluation.quality_gates import DEFAULT_QUALITY_GATES, evaluate_quality_gates
 from synthetic_br_profiles_gan.exceptions import QualityGateError
 from synthetic_br_profiles_gan.generation import select_valid_candidates
-from synthetic_br_profiles_gan.generators.demographics import criar_faker, finalizar_perfis_sinteticos
+from synthetic_br_profiles_gan.generators.demographics import (
+    IDENTIFIER_COLUMNS,
+    criar_estado_identificadores,
+    criar_faker,
+    finalizar_perfis_sinteticos,
+)
 from synthetic_br_profiles_gan.manifest import build_manifest, build_run_id, write_json
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 from synthetic_br_profiles_gan.models.base import create_synthesizer
@@ -155,10 +160,13 @@ def generate_profiles(
     rng = random.Random(seed)
     candidates: list[pd.DataFrame] = []
     valid_masks: list[pd.Series] = []
+    batch_lengths: list[int] = []
     attempts = 0
     sampling_seconds = 0.0
     postprocessing_seconds = 0.0
     candidate_validation_seconds = 0.0
+    used_identifiers = criar_estado_identificadores()
+    full_validation = None
 
     for attempts in range(1, int(max_batches) + 1):
         stage_started = time.perf_counter()
@@ -171,36 +179,90 @@ def generate_profiles(
             referencia=datetime.strptime(reference_date, "%Y-%m-%d"),
             rng=rng,
             date_format=date_format,
+            used_identifiers=used_identifiers,
         )
         postprocessing_seconds += time.perf_counter() - stage_started
         stage_started = time.perf_counter()
         validation = validate_profile_dataframe(final, metadata=metadata, final=True, reference_date=reference_date)
         candidate_validation_seconds += time.perf_counter() - stage_started
         candidates.append(final)
-        valid_masks.append(validation.valid_mask)
+        batch_lengths.append(int(len(final)))
+        valid_masks.append(validation.valid_mask.reset_index(drop=True))
         accepted_so_far = int(pd.concat(valid_masks, ignore_index=True).sum())
         if accepted_so_far >= n_target:
-            break
+            stage_started = time.perf_counter()
+            current_candidates = pd.concat(candidates, ignore_index=True)
+            full_validation = validate_profile_dataframe(
+                current_candidates,
+                metadata=metadata,
+                final=True,
+                reference_date=reference_date,
+            )
+            candidate_validation_seconds += time.perf_counter() - stage_started
+            if int(full_validation.valid_mask.sum()) >= n_target:
+                break
 
     all_candidates = pd.concat(candidates, ignore_index=True) if candidates else pd.DataFrame()
     all_masks = pd.concat(valid_masks, ignore_index=True) if valid_masks else pd.Series(dtype=bool)
-    full_validation = validate_profile_dataframe(
-        all_candidates,
-        metadata=metadata,
-        final=True,
-        reference_date=reference_date,
-    )
+    if full_validation is None or len(full_validation.valid_mask) != len(all_candidates):
+        full_validation = validate_profile_dataframe(
+            all_candidates,
+            metadata=metadata,
+            final=True,
+            reference_date=reference_date,
+        )
     selection = select_valid_candidates(
         all_candidates,
-        all_masks,
+        full_validation.valid_mask,
         n_target=n_target,
         rejection_reasons=full_validation.report.get("reason_counts", {}),
         attempts=attempts,
+        batch_valid_mask=all_masks,
+    )
+    if int(selection.accounting["selected"]) < int(n_target):
+        raise RuntimeError(
+            "Unable to generate the requested number of globally valid profiles "
+            f"after {attempts} batches: selected={selection.accounting['selected']} target={int(n_target)}."
+        )
+    disagreeing_mask = all_masks.reindex(all_candidates.index).fillna(False).astype(bool) & ~full_validation.valid_mask.reindex(
+        all_candidates.index
+    ).fillna(False).astype(bool)
+    selection.accounting["per_batch_valid_mask_count"] = int(all_masks.sum())
+    selection.accounting["concatenated_valid_mask_count"] = int(all_masks.sum())
+    selection.accounting["global_valid_mask_count"] = int(full_validation.valid_mask.sum())
+    selection.accounting["global_mask_disagreeing_count"] = int(disagreeing_mask.sum())
+    selection.accounting["global_mask_disagreeing_indices"] = [int(index) for index in all_candidates.index[disagreeing_mask][:100]]
+    selection.accounting["cross_batch_identifier_duplicates"] = _count_cross_batch_identifier_duplicates(
+        all_candidates,
+        batch_lengths=batch_lengths,
     )
     selection.accounting["sampling_seconds"] = float(sampling_seconds)
     selection.accounting["postprocessing_seconds"] = float(postprocessing_seconds)
     selection.accounting["candidate_validation_seconds"] = float(candidate_validation_seconds)
     return selection.selected, selection.accounting, full_validation.report
+
+
+def _count_cross_batch_identifier_duplicates(candidates: pd.DataFrame, batch_lengths: list[int]) -> int:
+    if candidates.empty or not batch_lengths:
+        return 0
+    batch_for_index: dict[int, int] = {}
+    start = 0
+    for batch, length in enumerate(batch_lengths):
+        for index in range(start, start + int(length)):
+            batch_for_index[index] = batch
+        start += int(length)
+    duplicate_count = 0
+    for column in IDENTIFIER_COLUMNS:
+        if column not in candidates.columns:
+            continue
+        duplicated = candidates[column].duplicated(keep=False)
+        if not duplicated.any():
+            continue
+        for _, group in candidates.loc[duplicated, [column]].groupby(column, sort=False):
+            batches = {batch_for_index.get(int(index)) for index in group.index}
+            if len(batches) > 1:
+                duplicate_count += max(len(group) - 1, 0)
+    return int(duplicate_count)
 
 
 def run_pipeline_on_splits(
