@@ -400,7 +400,40 @@ Execução documentada:
 - Interpretação: a CTGAN foi executada com sucesso com pelo menos 1.600.000 registros neste ambiente. O limite máximo absoluto não foi determinado.
 - Intervalo operacional observado: limite inferior observado de 1.600.000 registros; limite superior não determinado.
 
-Como não houve primeira falha observada para `programmatic` nem para `ctgan`, ainda não existe intervalo fechado para uma busca intermediária. Para localizar a primeira falha em uma nova etapa, o próximo patamar operacional recomendado é 3.200.000 registros de treinamento, mantendo a mesma cautela metodológica e sem executar esse tamanho automaticamente.
+Rodadas adicionais executadas em configurações separadas:
+
+- `capacity-upper-bound-20260727T223209Z-8cc6eb01`: teste exclusivo de 3.200.000 registros de treinamento, com 800.000 registros de holdout e 4.000.000 registros de calibração;
+- `capacity-upper-bound-20260727T233618Z-c6a38d16`: teste exclusivo de 6.400.000 registros de treinamento, com 1.600.000 registros de holdout e 8.000.000 registros de calibração.
+
+| Modelo | Treino | Holdout | Status técnico | Status de qualidade | Tempo de treino | Duração total | Pico de RSS | Tamanho do modelo |
+| --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
+| `programmatic` | 3.200.000 | 800.000 | `completed` | `approved` | 0,232 s | 31,872 s | 5.843,4 MiB | 0,01 MiB |
+| `ctgan` | 3.200.000 | 800.000 | `completed` | `approved` | 2.446,593 s | 2.486,856 s | 20.905,9 MiB | 197,17 MiB |
+| `programmatic` | 6.400.000 | 1.600.000 | `completed` | `approved` | 0,490 s | 61,440 s | 8.180,7 MiB | 0,01 MiB |
+| `ctgan` | 6.400.000 | 1.600.000 | `failed` | não aplicável | não concluído | 858,097 s até a falha | 22.140,0 MiB | não produzido |
+
+#### ProgrammaticSynthesizer, situação consolidada
+
+- Maior tamanho concluído: 6.400.000 registros de treinamento.
+- Primeira falha observada: não observada.
+- Tamanhos pulados: nenhum.
+- Status dos quality gates: `approved` em todos os tamanhos executados nesta etapa.
+- Interpretação: o modelo programático foi executado com sucesso com pelo menos 6.400.000 registros neste ambiente. O limite máximo absoluto não foi determinado.
+- Intervalo operacional observado: limite inferior observado de 6.400.000 registros; limite superior não determinado.
+
+#### CTGANSynthesizer, situação consolidada
+
+- Maior tamanho concluído: 3.200.000 registros de treinamento.
+- Primeira falha observada: 6.400.000 registros de treinamento.
+- Status da primeira falha: `failed`.
+- Estágio registrado: `pipeline`.
+- Tipo da falha: `OSError`.
+- Código de saída do worker: `4`.
+- Evidências: `result.json` foi produzido, `failure_message` registrou `[WinError 1450] Não existem recursos de sistema suficientes para concluir o serviço solicitado`, o pico de RSS observado foi de 22.140,0 MiB e `failures.json` registrou a falha.
+- Interpretação: a CTGAN foi executada com sucesso até 3.200.000 registros neste ambiente. A primeira falha foi observada em 6.400.000 registros. O limite máximo absoluto não foi determinado.
+- Intervalo operacional observado: entre 3.200.000 e 6.400.000 registros neste ambiente, sob os hiperparâmetros e versões utilizados.
+
+Para refinar a fronteira operacional observada da CTGAN, o próximo tamanho intermediário recomendado é 4.800.000 registros de treinamento. Para o modelo programático, que ainda não apresentou falha até 6.400.000 registros, o próximo patamar de exploração seria 12.800.000 registros. Nenhum desses tamanhos foi executado automaticamente nesta documentação.
 
 ## Estados e falhas
 
