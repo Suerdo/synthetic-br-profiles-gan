@@ -16,17 +16,14 @@ from synthetic_br_profiles_gan.calibration import save_calibration_splits
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge, load_yaml_config
 from synthetic_br_profiles_gan.evaluation.metrics import evaluate_against_reference
 from synthetic_br_profiles_gan.manifest import build_run_id, write_json
-from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
-from synthetic_br_profiles_gan.models.ctgan import CTGANSynthesizer
-from synthetic_br_profiles_gan.models.programmatic import ProgrammaticSynthesizer
-from synthetic_br_profiles_gan.models.simple_gan import SimpleTabularGAN
+from synthetic_br_profiles_gan.metadata import default_metadata
 from synthetic_br_profiles_gan.pipeline import (
     DEFAULT_PIPELINE_CONFIG,
     create_calibration,
-    generate_profiles,
     run_pipeline,
-    train_synthesizer,
 )
+from synthetic_br_profiles_gan.services.generation_service import GenerationRequest, run_generation
+from synthetic_br_profiles_gan.services.training_service import TrainingRequest, run_training
 from synthetic_br_profiles_gan.exceptions import ConfigurationError, ModelBackendUnavailable, PipelineError
 from synthetic_br_profiles_gan.validators.structural import validate_profile_dataframe
 
@@ -45,18 +42,6 @@ def _read_table(path: str | Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported table format: {table_path}")
 
 
-def _load_model(model_name: str, model_path: str | Path):
-    normalized = model_name.lower().replace("-", "_")
-    path = Path(model_path)
-    if normalized == "programmatic":
-        return ProgrammaticSynthesizer.load(path)
-    if normalized in {"simple_gan", "simple_tabular_gan", "dense_tabular_gan"}:
-        return SimpleTabularGAN.load(path)
-    if normalized in {"ctgan", "ctgan_synthesizer"}:
-        return CTGANSynthesizer.load(path)
-    raise ValueError(f"Unknown model: {model_name}")
-
-
 def _load_config(path: str | None) -> ConfigDict:
     return load_yaml_config(path) if path else {}
 
@@ -71,18 +56,24 @@ def build_parser() -> argparse.ArgumentParser:
     calibration.add_argument("--config", default="configs/calibration.yaml")
     calibration.add_argument("--output", default=None)
 
-    train = subparsers.add_parser("train", help="Train a synthesizer.")
+    train = subparsers.add_parser("train", help="Train and save a reusable synthesizer artifact.")
     train.add_argument("--model", required=True, choices=["programmatic", "simple_gan", "ctgan"])
     train.add_argument("--config", default=None)
     train.add_argument("--calibration", default=None, help="Path to train.parquet. Generated if omitted.")
     train.add_argument("--output", default=None)
+    train.add_argument("--train-rows", type=int, default=None)
+    train.add_argument("--seed", type=int, default=None)
+    train.add_argument("--overwrite", action="store_true")
 
-    generate = subparsers.add_parser("generate", help="Generate final profiles from a saved model.")
-    generate.add_argument("--model", required=True, choices=["programmatic", "simple_gan", "ctgan"])
+    generate = subparsers.add_parser("generate", help="Generate final profiles from a saved model or direct programmatic generator.")
+    generate.add_argument("--model", default=None, choices=["programmatic", "simple_gan", "ctgan"])
     generate.add_argument("--model-path", default=None)
     generate.add_argument("--rows", type=int, required=True)
     generate.add_argument("--config", default=None)
     generate.add_argument("--output", default=None)
+    generate.add_argument("--format", choices=["csv", "json", "parquet"], default="parquet")
+    generate.add_argument("--seed", type=int, default=None)
+    generate.add_argument("--overwrite", action="store_true")
 
     evaluate = subparsers.add_parser("evaluate", help="Evaluate synthetic data against one reference table.")
     evaluate.add_argument("--reference", required=True)
@@ -119,44 +110,71 @@ def command_create_calibration(args: argparse.Namespace) -> int:
 def command_train(args: argparse.Namespace) -> int:
     """Executa o comando train."""
     config = _load_config(args.config)
-    metadata = default_metadata()
-    if args.calibration:
-        train = _read_table(args.calibration)
+    seed = int(args.seed if args.seed is not None else config.get("seed", config.get("calibration", {}).get("seed", 41)))
+    holdout_fraction = float(config.get("holdout_fraction", config.get("calibration", {}).get("holdout_fraction", 0.20)))
+    if args.train_rows is not None:
+        train_rows = int(args.train_rows)
+    elif "train_rows" in config:
+        train_rows = int(config["train_rows"])
+    elif "num_rows" in config.get("calibration", {}):
+        train_rows = int(round(int(config["calibration"]["num_rows"]) * (1.0 - holdout_fraction)))
     else:
-        calibration = create_calibration(config.get("calibration", config))
-        train = calibration["train"]
-    output = Path(args.output) if args.output else Path("artifacts") / "models" / args.model / build_run_id() / "model"
-    model_config = config.get("models", {}).get(args.model, config)
-    train_synthesizer(args.model, train, metadata, model_config, output)
-    LOGGER.info("model_trained", extra={"model": args.model, "output": str(output)})
+        train_rows = 1000
+    output = Path(args.output) if args.output else Path("artifacts") / "models" / f"{args.model}-{build_run_id()}"
+    result = run_training(
+        TrainingRequest(
+            model=args.model,
+            output_path=output,
+            config=config,
+            seed=seed,
+            train_rows=train_rows,
+            holdout_fraction=holdout_fraction,
+            overwrite=bool(args.overwrite),
+            calibration_path=Path(args.calibration) if args.calibration else None,
+        )
+    )
+    LOGGER.info(
+        "model_trained",
+        extra={
+            "model": result.model,
+            "output": str(result.output_path),
+            "train_rows": result.train_rows,
+            "holdout_rows": result.holdout_rows,
+            "manifest": str(result.manifest_path),
+        },
+    )
     return 0
 
 
 def command_generate(args: argparse.Namespace) -> int:
     """Executa o comando generate."""
-    config = deep_merge(DEFAULT_PIPELINE_CONFIG, _load_config(args.config))
-    metadata = default_metadata()
-    if args.model_path:
-        synthesizer = _load_model(args.model, args.model_path)
+    config = _load_config(args.config)
+    seed = int(args.seed if args.seed is not None else config.get("seed", 41))
+    if args.output:
+        output = Path(args.output)
     else:
-        synthesizer = ProgrammaticSynthesizer(config.get("models", {}).get("programmatic", {}))
-        synthesizer.fit(pd.DataFrame(columns=metadata.model_columns), metadata)
-    output = Path(args.output) if args.output else Path("artifacts") / "generated" / build_run_id()
-    output.mkdir(parents=True, exist_ok=True)
-    dataset, generation, candidate_validation = generate_profiles(
-        synthesizer=synthesizer,
-        n_target=args.rows,
-        metadata=metadata,
-        seed=int(config["seed"]),
-        reference_date=str(config["reference_date"]),
-        batch_size=int(config["generation"]["batch_size"]),
-        max_batches=int(config["generation"]["max_batches"]),
-        date_format=str(config["generation"]["date_format"]),
+        output = Path("artifacts") / "generated" / f"{build_run_id()}.{args.format}"
+    result = run_generation(
+        GenerationRequest(
+            model=args.model,
+            model_path=Path(args.model_path) if args.model_path else None,
+            num_rows=int(args.rows),
+            output_path=output,
+            output_format=str(args.format),
+            seed=seed,
+            config=config,
+            overwrite=bool(args.overwrite),
+        )
     )
-    dataset_path = output / "dataset.parquet"
-    dataset.to_parquet(dataset_path, index=False)
-    write_json({"generation": generation, "candidate_validation": candidate_validation}, output / "generation.json")
-    LOGGER.info("dataset_generated", extra={"output": str(dataset_path), "rows": len(dataset)})
+    LOGGER.info(
+        "dataset_generated",
+        extra={
+            "model": result.model,
+            "output": str(result.output_path),
+            "manifest": str(result.manifest_path),
+            "rows": result.num_rows,
+        },
+    )
     return 0
 
 

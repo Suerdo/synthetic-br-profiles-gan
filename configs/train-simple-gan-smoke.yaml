@@ -1,0 +1,27 @@
+seed: 41
+train_rows: 80
+holdout_fraction: 0.20
+
+calibration:
+  income:
+    min: 800.0
+    max: 50000.0
+  age:
+    min: 18
+    max: 85
+  region_weights:
+    Norte: 0.09
+    Nordeste: 0.27
+    Centro-Oeste: 0.08
+    Sudeste: 0.42
+    Sul: 0.14
+
+models:
+  simple_gan:
+    epochs: 1
+    batch_size: 16
+    latent_dim: 8
+    learning_rate: 0.0001
+    beta_1: 0.5
+    verbose_every: 0
+    metrics_every: 0

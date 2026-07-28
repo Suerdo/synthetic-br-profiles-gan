@@ -22,6 +22,8 @@ O pacote separa as responsabilidades principais:
 - `metadata.py`: define schema, tipos, domínios, categorias e dependências estruturais.
 - `generators/`: contém o contexto de perfil e os geradores de nomes, datas, telefone e documentos fictícios.
 - `models/`: contém a interface comum `TabularSynthesizer`, o baseline programático, `SimpleTabularGAN` e `CTGANSynthesizer`.
+- `models/registry.py`: carrega modelos salvos a partir de `training_manifest.json` e valida arquivos obrigatórios.
+- `services/`: contém os serviços reutilizáveis de treinamento e geração, independentes da CLI.
 - `validators/`: centraliza a validação estrutural.
 - `evaluation/`: calcula métricas estatísticas, relacionais, de diversidade, de privacidade e quality gates, ou critérios automáticos de aprovação e rejeição.
 - `pipeline.py`: implementa a orquestração reutilizada pela CLI e pelo notebook.
@@ -71,25 +73,38 @@ python -m synthetic_br_profiles_gan create-calibration \
 
 ## Treinamento
 
-Treinar a GAN tabular densa simples:
+A CLI permite treinar e salvar um sintetizador uma única vez. O artefato salvo pode ser carregado posteriormente por `generate`, sem repetir o treinamento.
+
+Treinar o baseline programático como artefato reutilizável:
+
+```bash
+python -m synthetic_br_profiles_gan train \
+  --model programmatic \
+  --config configs/train-programmatic.yaml \
+  --output artifacts/models/programmatic-default
+```
+
+Treinar a GAN tabular densa simples em modo smoke:
 
 ```bash
 python -m synthetic_br_profiles_gan train \
   --model simple_gan \
-  --config configs/simple_gan.yaml \
-  --calibration artifacts/calibration/demo/train.parquet
+  --config configs/train-simple-gan-smoke.yaml \
+  --output artifacts/models/simple-gan-default
 ```
 
-Treinar a CTGAN:
+Treinar a CTGAN em modo smoke:
 
 ```bash
 python -m synthetic_br_profiles_gan train \
   --model ctgan \
-  --config configs/ctgan.yaml \
-  --calibration artifacts/calibration/demo/train.parquet
+  --config configs/train-ctgan-smoke.yaml \
+  --output artifacts/models/ctgan-default
 ```
 
 Na CTGAN, colunas categóricas e discretas são declaradas explicitamente, incluindo `DDD`. Categorias não são tratadas como números contínuos para posterior arredondamento.
+
+O comando `train --model programmatic` não simula treinamento neural. Ele grava `config.json`, `metadata.json`, `training_config.yaml` e `training_manifest.json`, com `training_required: false`.
 
 ## Geração, validação e avaliação
 
@@ -97,10 +112,25 @@ Gerar dados sintéticos a partir de um modelo salvo:
 
 ```bash
 python -m synthetic_br_profiles_gan generate \
-  --model programmatic \
-  --rows 1000 \
-  --config configs/pipeline.yaml
+  --model-path artifacts/models/ctgan-default \
+  --rows 10000 \
+  --output artifacts/generations/ctgan-10000.csv \
+  --format csv \
+  --seed 41
 ```
+
+Gerar diretamente pelo baseline programático, sem artefato salvo:
+
+```bash
+python -m synthetic_br_profiles_gan generate \
+  --model programmatic \
+  --rows 10000 \
+  --output artifacts/generations/programmatic-10000.csv \
+  --format csv \
+  --seed 41
+```
+
+O comando `generate` produz as 18 colunas finais, aplica pós-processamento contextual, valida estruturalmente o dataset e só exporta quando a validação bloqueante passa. Os formatos aceitos são `csv`, `json` e `parquet`. O CSV usa UTF-8, sem índice, com separador `;`, escolhido por compatibilidade prática com ferramentas brasileiras.
 
 Validar um dataset final:
 
@@ -253,9 +283,29 @@ Cada execução usa `run_id` com timestamp UTC:
 ```text
 artifacts/
   models/
-    <model>/
-      <run_id>/
-        model/
+    ctgan-default/
+      model.pkl
+      metadata.json
+      metadata_ctgan.json
+      training_manifest.json
+      training_config.yaml
+    simple-gan-default/
+      generator.keras
+      discriminator.keras
+      preprocessor.pkl
+      metadata.json
+      config.json
+      training_history.json
+      training_manifest.json
+      training_config.yaml
+    programmatic-default/
+      config.json
+      metadata.json
+      training_manifest.json
+      training_config.yaml
+  generations/
+    programmatic-10000.csv
+    programmatic-10000.manifest.json
   runs/
     <run_id>/
       approved/
@@ -278,11 +328,17 @@ Dentro de `approved/` ou `quarantine/` são salvos:
 
 O manifesto registra `run_id`, timestamp UTC, modelo, seed, quantidades, status, versões de bibliotecas, plataforma, CPU/GPU quando o backend está carregado, duração, hash da configuração, hashes dos artefatos e commit Git quando disponível.
 
+Modelos treinados pelo comando `train` usam `training_manifest.json`, com `schema_version`, `artifact_type`, modelo, seed, indicação de `training_required`, tamanhos de treino, holdout e calibração, colunas de modelo, colunas finais, configuração resolvida, ambiente, tempos e tamanho do artefato.
+
+Datasets gerados pelo comando `generate` recebem um manifesto próximo ao arquivo exportado, por exemplo `programmatic-10000.manifest.json`. Esse manifesto registra modelo, caminho do artefato de modelo quando houver, linhas, colunas, formato, seed, arquivo de saída, validação estrutural, tempos, ambiente e aviso de governança.
+
 ## Reprodutibilidade
 
 A seed é centralizada. O pipeline controla `random`, NumPy e, quando o modelo exige, TensorFlow ou PyTorch/CTGAN. Variáveis como `PYTHONHASHSEED` são registradas, mas a documentação do manifesto avisa quando foram alteradas depois do início do interpretador.
 
 Operações neurais podem variar entre CPU, GPU, drivers e versões de backend. Os testes padrão evitam exigir igualdade bit a bit de TensorFlow ou CTGAN.
+
+No fluxo separado, `generate --seed` controla a amostragem quando o sintetizador oferece suporte, além de Faker, identificadores, data de nascimento e pós-processamento. Duas gerações programáticas com o mesmo artefato, seed, quantidade e versão do projeto devem produzir o mesmo arquivo. Backends neurais podem ter limitações adicionais de determinismo.
 
 ## Notebook
 
@@ -294,7 +350,7 @@ O notebook em `notebooks/` importa o pacote e demonstra execução, amostra, val
 python -m unittest discover -s tests
 ```
 
-Os testes cobrem schema, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, reprodutibilidade e pipeline pequeno.
+Os testes cobrem schema, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, serviços de treinamento e geração, carregamento de modelos, reprodutibilidade e pipeline pequeno.
 
 ## Limitações
 

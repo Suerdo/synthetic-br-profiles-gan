@@ -28,11 +28,20 @@ A calibração é dividida em treino e holdout com seed configurável. Modelos t
 - `SimpleTabularGAN`: GAN tabular densa simples preservada do projeto original.
 - `CTGANSynthesizer`: CTGAN real via biblioteca standalone `ctgan`.
 
-## 4. Pós-processamento
+## 4. Treinamento e geração separados
+
+O projeto possui dois fluxos reutilizáveis além do pipeline experimental completo:
+
+- `train`: prepara dados sintéticos de calibração, cria treino e holdout, ajusta o sintetizador quando o modelo exige treinamento, salva o artefato do modelo e grava `training_manifest.json`.
+- `generate`: carrega um artefato salvo por manifesto, ou instancia diretamente o `ProgrammaticSynthesizer`, gera colunas-base, aplica pós-processamento, valida estruturalmente as 18 colunas finais, exporta o dataset e grava o manifesto da geração.
+
+Essa separação permite treinar `simple_gan` ou `ctgan` uma vez e reutilizar o modelo para várias gerações com diferentes seeds e quantidades de linhas. O baseline programático não possui etapa neural; o artefato salvo registra `training_required: false`.
+
+## 5. Pós-processamento
 
 As saídas do modelo viram `SyntheticProfileContext`. A partir desse contexto, são derivados nome, data de nascimento, telefone e identificadores fictícios. A data de nascimento é sorteada dentro do intervalo que produz exatamente a idade informada na data de referência.
 
-## 5. Validação e avaliação
+## 6. Validação e avaliação
 
 A seleção de linhas usa schema, tipos, domínios, regras semânticas, documentos matematicamente válidos e duplicidade. O discriminador da GAN simples não é usado como probabilidade calibrada nem como filtro principal.
 
