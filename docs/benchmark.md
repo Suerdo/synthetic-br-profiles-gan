@@ -466,6 +466,114 @@ Por esse motivo, não será realizado, nesta fase, o teste com 12.800.000 regist
 
 Essa decisão é metodológica, não uma limitação conhecida do código. O valor de 6.400.000 registros representa apenas o maior tamanho testado com sucesso. O limite máximo absoluto do sintetizador programático não foi determinado.
 
+## Qualidade dos sintetizadores com o vocabulário 2
+
+O benchmark de qualidade do vocabulário 2 avalia o espaço categórico em português brasileiro, com normalização Unicode `NFC` e 37 ocupações estruturadas. O objetivo é medir cobertura, coerência e diversidade do novo vocabulário, especialmente nas relações entre `Ocupacao`, `Escolaridade`, `Idade` e `Renda`. Essa etapa não mede capacidade máxima e não ajusta pesos, multiplicadores ou regras sintéticas.
+
+A avaliação distingue dois estágios:
+
+- `raw`: saída diagnóstica imediatamente produzida por `synthesizer.sample(...)`, antes de aliases, normalização linguística, pós-processamento e validação final;
+- `final`: resultado após normalização pt-BR, aliases, normalização estrutural, pós-processamento e validação final.
+
+Essa separação evita atribuir ao modelo neural uma qualidade que tenha sido introduzida depois pelo pipeline. O resultado `final` demonstra a qualidade do dataset exportável; o resultado `raw` mostra quanto o sintetizador aprendeu diretamente.
+
+Configurações adicionadas:
+
+- `configs/benchmark-quality-vocab-v2-smoke.yaml`: validação técnica pequena com os três modelos, uma seed e 1.000 registros de treinamento;
+- `configs/benchmark-quality-vocab-v2.yaml`: benchmark principal com os três modelos, seeds `41`, `42` e `43`, 20.000 registros de treinamento, 5.000 registros de holdout e 20.000 registros sintéticos por execução.
+
+Com `holdout_fraction: 0.20`, cada seed do benchmark principal usa:
+
+| Conjunto | Registros |
+| --- | ---: |
+| Treinamento | 20.000 |
+| Holdout | 5.000 |
+| Calibração total | 25.000 |
+
+Execução principal documentada:
+
+- `benchmark_id`: `quality-vocab-v2-20260728T131154Z-364a35cb`;
+- sistema operacional: Windows 11 (`Windows-11-10.0.26200-SP0`);
+- Python: `3.13.13`;
+- `ctgan`: `0.12.1`;
+- TensorFlow: `2.21.0`;
+- PyTorch: `2.13.0`;
+- `pandas`: `2.3.3`;
+- `pyarrow`: `24.0.0`;
+- CPU lógica reportada: `32`;
+- GPU CUDA reportada: indisponível.
+
+Hiperparâmetros do benchmark principal:
+
+| Modelo | Épocas | Batch | Observação |
+| --- | ---: | ---: | --- |
+| `programmatic` | não aplicável | não aplicável | Não possui treinamento neural |
+| `simple_gan` | 20 | 128 | GAN tabular densa simples em Keras |
+| `ctgan` | 20 | 500 | CTGAN da biblioteca `ctgan` |
+
+Resumo por execução:
+
+| Modelo | Seed | Status | Linhas válidas | Cobertura raw | Cobertura final | Validade escolaridade-ocupação raw | Validade final | Wasserstein norm. renda | KS renda |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `programmatic` | 41 | `approved` | 20.000 | 1,000 | 1,000 | 1,000 | 1,000 | 0,025 | 0,017 |
+| `programmatic` | 42 | `approved` | 20.000 | 1,000 | 1,000 | 1,000 | 1,000 | 0,022 | 0,011 |
+| `programmatic` | 43 | `rejected` | 19.999 | 1,000 | 1,000 | 1,000 | 1,000 | 0,020 | 0,015 |
+| `simple_gan` | 41 | `quarantined` | 2.259 | 0,081 | 0,135 | 0,020 | 1,000 | 0,883 | 0,677 |
+| `simple_gan` | 42 | `quarantined` | 20.000 | 0,189 | 0,162 | 0,943 | 1,000 | 0,657 | 0,426 |
+| `simple_gan` | 43 | `rejected` | 19.999 | 0,027 | 0,027 | 1,000 | 1,000 | 0,852 | 0,643 |
+| `ctgan` | 41 | `approved` | 20.000 | 1,000 | 1,000 | 0,914 | 1,000 | 0,118 | 0,116 |
+| `ctgan` | 42 | `approved` | 20.000 | 1,000 | 1,000 | 0,912 | 1,000 | 0,115 | 0,040 |
+| `ctgan` | 43 | `rejected` | 19.999 | 1,000 | 1,000 | 0,913 | 1,000 | 0,324 | 0,139 |
+
+Agregação exploratória por modelo:
+
+| Modelo | Cobertura raw média | Cobertura final média | Distância ocupação raw | Distância ocupação final | Entropia raw | Entropia final | Maior ocupação raw | Maior ocupação final |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `programmatic` | 1,000 | 1,000 | 0,034 | 0,036 | 3,251 | 3,249 | 0,077 | 0,079 |
+| `simple_gan` | 0,099 | 0,108 | 0,912 | 0,885 | 0,394 | 0,534 | 0,837 | 0,690 |
+| `ctgan` | 1,000 | 1,000 | 0,105 | 0,129 | 3,291 | 3,077 | 0,088 | 0,105 |
+
+O `ProgrammaticSynthesizer` e a `CTGANSynthesizer` cobriram as 37 ocupações nas três seeds, tanto em `raw` quanto em `final`. A `SimpleTabularGAN` apresentou forte concentração em poucas categorias: a cobertura final média foi de aproximadamente 10,8%, com 31 a 36 ocupações ausentes por seed.
+
+Para ocupações raras, definidas como ocupações com participação inferior a 1% no conjunto de holdout, `programmatic` e `ctgan` reproduziram todas as categorias raras observadas nas três seeds. A `simple_gan` reproduziu 0 de 13 ou 14 ocupações raras no resultado final das três seeds; na saída `raw`, reproduziu uma ocupação rara apenas na seed `42`.
+
+As combinações `Escolaridade`-`Ocupacao` foram totalmente válidas no resultado `final` de todos os modelos, porque a validação e a normalização estrutural atuam antes da exportação. Na saída `raw`, a CTGAN preservou cerca de 91,3% de combinações válidas. A GAN simples variou bastante: uma seed apresentou validade bruta de apenas 2,0%, com concentração em combinações como `Fundamental + Técnico`.
+
+As combinações `Idade`-`Ocupacao` também foram totalmente válidas no resultado `final`. Na saída `raw`, a CTGAN ficou entre 97,7% e 98,4% de validade, principalmente por produzir casos de `Aposentado` em idades abaixo do limite obrigatório. A GAN simples ficou próxima de 100% nessa métrica específica, embora com baixa diversidade ocupacional.
+
+A comparação de renda por ocupação confirma a vantagem estrutural do modelo programático, porque a referência também é gerada pelas mesmas regras sintéticas. O modelo programático preservou melhor as diferenças esperadas entre pares como `Médico` versus `Atendente` e `Gerente` versus `Auxiliar Administrativo`. A CTGAN reproduziu cobertura ampla, mas reduziu fortemente a separação média entre algumas ocupações qualificadas e operacionais. A GAN simples não teve amostra suficiente para várias comparações, pois não cobriu a maior parte do catálogo.
+
+A auditoria de gênero registra uma regra metodológica: gênero não é utilizado como parâmetro no cálculo sintético da renda. Eventuais diferenças amostrais por gênero são diagnósticas e não representam uma regra implementada.
+
+Os quality gates específicos do vocabulário 2 consideram bloqueantes a quantidade final de linhas, o schema final, categorias canônicas, ausência de categorias legadas no resultado final, compatibilidade estrutural, renda dentro dos limites e normalização Unicode `NFC`. Métricas como cobertura ocupacional, entropia, distância da distribuição e coerência bruta permanecem diagnósticas nesta primeira versão, pois ainda não há base empírica suficiente para limiares definitivos.
+
+Status observados:
+
+- `programmatic`: duas execuções `approved` e uma `rejected`;
+- `ctgan`: duas execuções `approved` e uma `rejected`;
+- `simple_gan`: duas execuções `quarantined` e uma `rejected`.
+
+As rejeições de `programmatic`, `ctgan` e `simple_gan` na seed `43` foram causadas por quality gates obrigatórios (`invalid_rows_max` e `duplicated_identifier_max`) com uma linha inválida ou identificador duplicado. Não houve falhas técnicas no benchmark principal; `failures.json` permaneceu vazio.
+
+Artefatos específicos gerados em `artifacts/benchmarks/quality-vocab-v2-20260728T131154Z-364a35cb/`:
+
+- `vocabulary_v2_metrics.csv` e `vocabulary_v2_metrics.parquet`;
+- `occupation_coverage.csv` e `occupation_coverage.parquet`;
+- `occupation_distribution.csv` e `occupation_distribution.parquet`;
+- `occupation_income_summary.csv` e `occupation_income_summary.parquet`;
+- `invalid_education_occupation.csv` e `invalid_education_occupation.parquet`;
+- `invalid_age_occupation.csv` e `invalid_age_occupation.parquet`;
+- `rare_occupation_coverage.csv` e `rare_occupation_coverage.parquet`;
+- `raw_vs_final_summary.json`.
+
+Interpretação cautelosa:
+
+- `ProgrammaticSynthesizer`: permanece como opção padrão para a interface. O resultado tem vantagem estrutural porque a referência sintética é gerada pelo mesmo conjunto de regras.
+- `SimpleTabularGAN`: permanece como baseline acadêmico experimental. O benchmark mostrou baixa cobertura do catálogo e sinais de concentração ocupacional.
+- `CTGANSynthesizer`: foi aprovada para treinamento de um artefato candidato maior, pois cobriu as 37 ocupações e preservou parte relevante das dependências, embora ainda dependa do pós-processamento para validade final e tenha reduzido contrastes de renda por ocupação.
+
+Os resultados anteriores não foram usados como substitutos desta avaliação, pois o vocabulário categórico e o catálogo de ocupações foram ampliados. A análise distingue a capacidade aprendida pelos modelos na saída bruta das correções aplicadas pelo pipeline no resultado final.
+
 ## Estados e falhas
 
 Cada execução individual preserva os estados do pipeline:

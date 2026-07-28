@@ -280,6 +280,7 @@ def validate_benchmark_config(config: ConfigDict) -> None:
             "execution",
             "resource_limits",
             "ranking",
+            "vocabulary_quality",
         },
         "benchmark_config",
     )
@@ -305,8 +306,8 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     )
     if not isinstance(benchmark.get("name"), str) or not benchmark["name"]:
         raise ConfigurationError("benchmark.name must be a non-empty string.")
-    if benchmark.get("type", "quality") not in {"quality", "capacity"}:
-        raise ConfigurationError("benchmark.type must be quality or capacity.")
+    if benchmark.get("type", "quality") not in {"quality", "capacity", "vocabulary_quality"}:
+        raise ConfigurationError("benchmark.type must be quality, capacity, or vocabulary_quality.")
     models = benchmark.get("models")
     if not isinstance(models, list) or not models:
         raise ConfigurationError("benchmark.models must be a non-empty list.")
@@ -471,6 +472,25 @@ def validate_benchmark_config(config: ConfigDict) -> None:
         _require_bool(ranking, "enabled", "ranking")
     if ranking.get("enabled", False):
         raise ConfigurationError("ranking.enabled must remain false until exploratory ranking is implemented.")
+
+    vocabulary_quality = config.get("vocabulary_quality", {})
+    if not isinstance(vocabulary_quality, dict):
+        raise ConfigurationError("vocabulary_quality must be a mapping when provided.")
+    _reject_unknown(
+        vocabulary_quality,
+        {"rare_occupation_threshold", "minimum_income_group_count", "low_count_threshold"},
+        "vocabulary_quality",
+    )
+    if "rare_occupation_threshold" in vocabulary_quality:
+        try:
+            threshold = float(vocabulary_quality["rare_occupation_threshold"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError("vocabulary_quality.rare_occupation_threshold must be a float between 0 and 1.") from exc
+        if not 0 < threshold < 1:
+            raise ConfigurationError("vocabulary_quality.rare_occupation_threshold must be between 0 and 1.")
+    for key in ["minimum_income_group_count", "low_count_threshold"]:
+        if key in vocabulary_quality:
+            _require_positive_int(vocabulary_quality, key, "vocabulary_quality")
 
 
 def validate_pipeline_config(config: ConfigDict) -> None:

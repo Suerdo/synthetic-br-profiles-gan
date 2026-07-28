@@ -33,6 +33,12 @@ from synthetic_br_profiles_gan.config import (
     validate_benchmark_config,
 )
 from synthetic_br_profiles_gan.evaluation.quality_gates import DEFAULT_QUALITY_GATES
+from synthetic_br_profiles_gan.evaluation.vocabulary import (
+    DEFAULT_LOW_COUNT_THRESHOLD,
+    DEFAULT_MINIMUM_INCOME_GROUP_COUNT,
+    DEFAULT_RARE_OCCUPATION_THRESHOLD,
+    evaluate_vocabulary_v2_quality,
+)
 from synthetic_br_profiles_gan.exceptions import ModelBackendUnavailable, PipelineError
 from synthetic_br_profiles_gan.manifest import (
     build_run_id,
@@ -43,6 +49,7 @@ from synthetic_br_profiles_gan.manifest import (
 )
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 from synthetic_br_profiles_gan.pipeline import DEFAULT_PIPELINE_CONFIG, run_pipeline_on_splits
+from synthetic_br_profiles_gan.utils.reproducibility import set_global_seed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +118,11 @@ DEFAULT_BENCHMARK_CONFIG: ConfigDict = {
         "max_total_seconds_per_run": None,
         "max_peak_memory_mb": None,
         "stop_larger_sizes_after_resource_failure": True,
+    },
+    "vocabulary_quality": {
+        "rare_occupation_threshold": DEFAULT_RARE_OCCUPATION_THRESHOLD,
+        "minimum_income_group_count": DEFAULT_MINIMUM_INCOME_GROUP_COUNT,
+        "low_count_threshold": DEFAULT_LOW_COUNT_THRESHOLD,
     },
     "ranking": {"enabled": False},
 }
@@ -195,6 +207,23 @@ RUN_SUMMARY_COLUMNS = [
     "ctgan_batches_per_epoch_inferred",
     "ctgan_total_batches_inferred",
     "resource_limited",
+    "occupation_raw_coverage",
+    "occupation_final_coverage",
+    "occupation_distribution_distance_raw",
+    "occupation_distribution_distance_final",
+    "occupation_entropy_raw",
+    "occupation_entropy_final",
+    "most_frequent_occupation_share_raw",
+    "most_frequent_occupation_share_final",
+    "education_occupation_valid_rate_raw",
+    "education_occupation_valid_rate_final",
+    "age_occupation_valid_rate_raw",
+    "age_occupation_valid_rate_final",
+    "legacy_occupations_raw_count",
+    "legacy_occupations_final_count",
+    "unicode_nfc_valid_raw",
+    "unicode_nfc_valid_final",
+    "vocabulary_quality_gate_status",
 ]
 CAPACITY_RESULT_COLUMNS = [
     "benchmark_id",
@@ -1801,6 +1830,26 @@ def _run_one_model(
             metadata=metadata,
             resource_probe=monitor.current_memory_mb,
         )
+        if effective["benchmark"].get("type") == "vocabulary_quality":
+            raw_sample = _sample_raw_synthesizer_output(
+                model=model,
+                model_dir=run_result.get("model_dir"),
+                rows=int(effective["benchmark"]["synthetic_rows"]),
+                seed=seed,
+                metadata=metadata,
+            )
+            vocabulary_config = effective.get("vocabulary_quality", {})
+            run_result["vocabulary_quality"] = evaluate_vocabulary_v2_quality(
+                reference=holdout,
+                raw=raw_sample,
+                final=run_result["dataset"],
+                metadata=metadata,
+                requested_rows=int(effective["benchmark"]["synthetic_rows"]),
+                validation_report=run_result.get("validation", {}),
+                rare_threshold=float(vocabulary_config.get("rare_occupation_threshold", DEFAULT_RARE_OCCUPATION_THRESHOLD)),
+                minimum_income_group_count=int(vocabulary_config.get("minimum_income_group_count", DEFAULT_MINIMUM_INCOME_GROUP_COUNT)),
+                low_count_threshold=int(vocabulary_config.get("low_count_threshold", DEFAULT_LOW_COUNT_THRESHOLD)),
+            )
     run_result["resource_monitor"] = {
         "peak_memory_mb": monitor.peak_memory_mb,
         "cpu_count": os.cpu_count(),
@@ -1822,6 +1871,41 @@ def _run_one_model(
     )
     long_rows = flatten_run_metrics(benchmark_id, model, seed, run_result, train_size=train_size, holdout_size=holdout_size)
     return {"run_reference": run_reference, "summary_row": summary_row, "long_rows": long_rows}
+
+
+def _sample_raw_synthesizer_output(
+    model: str,
+    model_dir: Any,
+    rows: int,
+    seed: int,
+    metadata: DatasetMetadata,
+) -> pd.DataFrame:
+    """Amostra a saída bruta do sintetizador salvo para diagnóstico de vocabulário."""
+    model_path = Path(model_dir)
+    set_global_seed(
+        int(seed),
+        seed_tensorflow=model == "simple_gan",
+        seed_torch=model == "ctgan",
+    )
+    if model == "programmatic":
+        from synthetic_br_profiles_gan.models.programmatic import ProgrammaticSynthesizer
+
+        synthesizer = ProgrammaticSynthesizer.load(model_path)
+        return synthesizer.sample(int(rows))
+    if model == "simple_gan":
+        from synthetic_br_profiles_gan.models.simple_gan import SimpleTabularGAN
+
+        synthesizer = SimpleTabularGAN.load(model_path)
+        return synthesizer.sample(int(rows))
+    if model == "ctgan":
+        from synthetic_br_profiles_gan.models.ctgan import CTGANSynthesizer
+
+        synthesizer = CTGANSynthesizer.load(model_path)
+        if getattr(synthesizer, "model", None) is not None:
+            sampled = synthesizer.model.sample(int(rows))
+            return sampled[[column for column in metadata.model_columns if column in sampled.columns]].copy()
+        return synthesizer.sample(int(rows))
+    raise ValueError(f"Unsupported model for raw sampling: {model}")
 
 
 def summarize_run(
@@ -1852,6 +1936,11 @@ def summarize_run(
     monitor = result.get("resource_monitor", {})
     simple_history = _read_simple_gan_history(result.get("model_dir"))
     ctgan_training = _ctgan_training_inference(model, result, train_size)
+    vocabulary = result.get("vocabulary_quality", {})
+    occupation = vocabulary.get("occupation", {})
+    coherence = vocabulary.get("coherence", {})
+    locale = vocabulary.get("locale", {})
+    vocabulary_gates = vocabulary.get("quality_gates", {})
     return {
         "benchmark_id": benchmark_id,
         "run_id": result["run_id"],
@@ -1900,6 +1989,23 @@ def summarize_run(
         "ctgan_batches_per_epoch_inferred": ctgan_training.get("batches_per_epoch_inferred"),
         "ctgan_total_batches_inferred": ctgan_training.get("total_batches_inferred"),
         "resource_limited": False,
+        "occupation_raw_coverage": occupation.get("occupation_raw_coverage"),
+        "occupation_final_coverage": occupation.get("occupation_final_coverage"),
+        "occupation_distribution_distance_raw": occupation.get("occupation_distribution_distance_raw"),
+        "occupation_distribution_distance_final": occupation.get("occupation_distribution_distance_final"),
+        "occupation_entropy_raw": occupation.get("occupation_entropy_raw"),
+        "occupation_entropy_final": occupation.get("occupation_entropy_final"),
+        "most_frequent_occupation_share_raw": occupation.get("most_frequent_occupation_share_raw"),
+        "most_frequent_occupation_share_final": occupation.get("most_frequent_occupation_share_final"),
+        "education_occupation_valid_rate_raw": coherence.get("education_occupation_valid_rate_raw"),
+        "education_occupation_valid_rate_final": coherence.get("education_occupation_valid_rate_final"),
+        "age_occupation_valid_rate_raw": coherence.get("age_occupation_valid_rate_raw"),
+        "age_occupation_valid_rate_final": coherence.get("age_occupation_valid_rate_final"),
+        "legacy_occupations_raw_count": len(occupation.get("legacy_occupations_raw", [])) if occupation else None,
+        "legacy_occupations_final_count": len(occupation.get("legacy_occupations_final", [])) if occupation else None,
+        "unicode_nfc_valid_raw": locale.get("unicode_nfc_valid_raw"),
+        "unicode_nfc_valid_final": locale.get("unicode_nfc_valid_final"),
+        "vocabulary_quality_gate_status": vocabulary_gates.get("status"),
     }
 
 
@@ -2011,6 +2117,10 @@ def flatten_run_metrics(
     for metric, value in gates.get("metrics_checked", {}).items():
         add("quality_gates", metric, None, value)
 
+    vocabulary = result.get("vocabulary_quality", {})
+    if vocabulary:
+        _add_vocabulary_long_rows(add, vocabulary)
+
     resources = result.get("stage_resources", {})
     monitor = result.get("resource_monitor", {})
     add("resources", "memory_before_training_mb", None, resources.get("memory_before_training_mb"))
@@ -2031,6 +2141,137 @@ def flatten_run_metrics(
         add("training", "ctgan_total_batches_inferred", None, ctgan_training.get("total_batches_inferred"))
 
     return rows
+
+
+def _add_vocabulary_long_rows(add, vocabulary: dict[str, Any]) -> None:
+    original_add = add
+
+    def add(
+        metric_group: str,
+        metric_name: str,
+        column: str | None,
+        value: Any,
+        reference: Any = None,
+        difference: Any = None,
+        details: Any = None,
+    ) -> None:
+        safe_value = value
+        safe_details = details
+        if isinstance(value, bool):
+            safe_value = int(value)
+        elif isinstance(value, (str, dict, list, tuple)):
+            safe_value = None
+            safe_details = value if safe_details is None else safe_details
+        original_add(metric_group, metric_name, column, safe_value, reference, difference, safe_details)
+
+    occupation = vocabulary.get("occupation", {})
+    coherence = vocabulary.get("coherence", {})
+    rare = vocabulary.get("rare_occupations", {})
+    income_by_occupation = vocabulary.get("income_by_occupation", {})
+    comparisons = vocabulary.get("income_comparisons", {})
+    diversity = vocabulary.get("diversity", {})
+    locale = vocabulary.get("locale", {})
+    gates = vocabulary.get("quality_gates", {})
+
+    scalar_metrics = {
+        "occupation_reference_coverage": occupation.get("occupation_reference_coverage"),
+        "occupation_raw_coverage": occupation.get("occupation_raw_coverage"),
+        "occupation_final_coverage": occupation.get("occupation_final_coverage"),
+        "occupation_distribution_distance": occupation.get("occupation_distribution_distance"),
+        "occupation_distribution_distance_raw": occupation.get("occupation_distribution_distance_raw"),
+        "occupation_distribution_distance_final": occupation.get("occupation_distribution_distance_final"),
+        "occupation_entropy_reference": occupation.get("occupation_entropy_reference"),
+        "occupation_entropy_raw": occupation.get("occupation_entropy_raw"),
+        "occupation_entropy_final": occupation.get("occupation_entropy_final"),
+        "most_frequent_occupation_share_raw": occupation.get("most_frequent_occupation_share_raw"),
+        "most_frequent_occupation_share_final": occupation.get("most_frequent_occupation_share_final"),
+        "education_occupation_valid_rate_raw": coherence.get("education_occupation_valid_rate_raw"),
+        "education_occupation_valid_rate_final": coherence.get("education_occupation_valid_rate_final"),
+        "education_occupation_invalid_count_raw": coherence.get("education_occupation_invalid_count_raw"),
+        "education_occupation_invalid_count_final": coherence.get("education_occupation_invalid_count_final"),
+        "age_occupation_valid_rate_raw": coherence.get("age_occupation_valid_rate_raw"),
+        "age_occupation_valid_rate_final": coherence.get("age_occupation_valid_rate_final"),
+        "age_occupation_invalid_count_raw": coherence.get("age_occupation_invalid_count_raw"),
+        "age_occupation_invalid_count_final": coherence.get("age_occupation_invalid_count_final"),
+        "legacy_occupations_raw_count": len(occupation.get("legacy_occupations_raw", [])),
+        "legacy_occupations_final_count": len(occupation.get("legacy_occupations_final", [])),
+        "unicode_nfc_valid_raw": locale.get("unicode_nfc_valid_raw"),
+        "unicode_nfc_valid_final": locale.get("unicode_nfc_valid_final"),
+        "legacy_value_count_raw": locale.get("legacy_value_count_raw"),
+        "legacy_value_count_final": locale.get("legacy_value_count_final"),
+        "vocabulary_quality_gate_status": gates.get("status"),
+    }
+    for metric_name, value in scalar_metrics.items():
+        add("vocabulary_summary", metric_name, None, value)
+    add("vocabulary_summary", "missing_occupations_raw", None, len(occupation.get("missing_occupations_raw", [])), details=occupation.get("missing_occupations_raw", []))
+    add("vocabulary_summary", "missing_occupations_final", None, len(occupation.get("missing_occupations_final", [])), details=occupation.get("missing_occupations_final", []))
+    add("vocabulary_summary", "unexpected_occupations_raw", None, len(occupation.get("unexpected_occupations_raw", [])), details=occupation.get("unexpected_occupations_raw", []))
+    add("vocabulary_summary", "unexpected_occupations_final", None, len(occupation.get("unexpected_occupations_final", [])), details=occupation.get("unexpected_occupations_final", []))
+    add("vocabulary_summary", "legacy_occupations_raw", None, len(occupation.get("legacy_occupations_raw", [])), details=occupation.get("legacy_occupations_raw", []))
+    add("vocabulary_summary", "legacy_occupations_final", None, len(occupation.get("legacy_occupations_final", [])), details=occupation.get("legacy_occupations_final", []))
+
+    for metric_name in ["occupation_reference_count", "occupation_raw_count", "occupation_final_count"]:
+        for occupation_name, count in occupation.get(metric_name, {}).items():
+            add("vocabulary_occupation_distribution", metric_name, occupation_name, count)
+
+    reference_counts = occupation.get("occupation_reference_count", {})
+    raw_counts = occupation.get("occupation_raw_count", {})
+    final_counts = occupation.get("occupation_final_count", {})
+    for occupation_name in sorted(set(reference_counts) | set(raw_counts) | set(final_counts)):
+        add(
+            "vocabulary_occupation_coverage",
+            "occupation_present_raw",
+            occupation_name,
+            bool(raw_counts.get(occupation_name, 0) > 0),
+            reference=bool(reference_counts.get(occupation_name, 0) > 0),
+        )
+        add(
+            "vocabulary_occupation_coverage",
+            "occupation_present_final",
+            occupation_name,
+            bool(final_counts.get(occupation_name, 0) > 0),
+            reference=bool(reference_counts.get(occupation_name, 0) > 0),
+        )
+
+    for occupation_name, row in rare.get("occupations", {}).items():
+        for metric_name, value in row.items():
+            add("vocabulary_rare_occupation", metric_name, occupation_name, value)
+
+    for row in coherence.get("invalid_education_occupation_raw", []):
+        column = f"{row.get('Escolaridade')} + {row.get('Ocupacao')}"
+        add("vocabulary_invalid_education_occupation", "raw_invalid_count", column, row.get("count"), details=row)
+    for row in coherence.get("invalid_education_occupation_final", []):
+        column = f"{row.get('Escolaridade')} + {row.get('Ocupacao')}"
+        add("vocabulary_invalid_education_occupation", "final_invalid_count", column, row.get("count"), details=row)
+    for row in coherence.get("invalid_age_occupation_raw", []):
+        column = f"{row.get('Idade')} + {row.get('Ocupacao')}"
+        add("vocabulary_invalid_age_occupation", "raw_invalid_count", column, row.get("count"), details=row)
+    for row in coherence.get("invalid_age_occupation_final", []):
+        column = f"{row.get('Idade')} + {row.get('Ocupacao')}"
+        add("vocabulary_invalid_age_occupation", "final_invalid_count", column, row.get("count"), details=row)
+
+    for stage, summaries in income_by_occupation.items():
+        for occupation_name, summary in summaries.items():
+            for metric_name, value in summary.items():
+                add("vocabulary_occupation_income", f"{stage}_{metric_name}", occupation_name, value)
+
+    for comparison_name, stage_rows in comparisons.items():
+        for stage, comparison in stage_rows.items():
+            for metric_name, value in comparison.items():
+                add("vocabulary_income_comparison", f"{stage}_{metric_name}", comparison_name, value)
+
+    for stage, metrics in diversity.items():
+        for metric_name, value in metrics.items():
+            add("vocabulary_diversity", f"{stage}_{metric_name}", None, value)
+
+    for stage, audit in vocabulary.get("gender_audit", {}).items():
+        add("vocabulary_gender_audit", f"{stage}_income_by_gender", None, None, details=audit)
+    add("vocabulary_gender_audit", "methodological_notice", None, None, details=vocabulary.get("methodological_notice"))
+
+    for check in gates.get("blocking_checks", []):
+        add("vocabulary_quality_gates", check.get("name"), None, check.get("passed"), details=check)
+    for check in gates.get("diagnostic_checks", []):
+        add("vocabulary_quality_gates", check.get("name"), None, check.get("value"), details=check)
 
 
 def _correlation_method_mean(correlations: dict[str, Any], method: str) -> float | None:
@@ -2319,6 +2560,18 @@ def _write_benchmark_outputs(
         outputs["plot_data_csv"] = benchmark_dir / "plot_data.csv"
         summary_frame.to_csv(outputs["plot_data_csv"], index=False)
 
+    if config["benchmark"].get("type") == "vocabulary_quality":
+        outputs.update(
+            _write_vocabulary_quality_outputs(
+                benchmark_dir=benchmark_dir,
+                long_frame=long_frame,
+                summary_frame=summary_frame,
+                export_csv=export_csv,
+                export_parquet=export_parquet,
+                export_json=export_json,
+            )
+        )
+
     manifest = _benchmark_manifest(
         benchmark_id=benchmark_id,
         config=config,
@@ -2333,6 +2586,73 @@ def _write_benchmark_outputs(
     )
     outputs["benchmark_manifest"] = write_json(manifest, benchmark_dir / "benchmark_manifest.json")
     return outputs
+
+
+def _write_vocabulary_quality_outputs(
+    benchmark_dir: Path,
+    long_frame: pd.DataFrame,
+    summary_frame: pd.DataFrame,
+    export_csv: bool,
+    export_parquet: bool,
+    export_json: bool,
+) -> dict[str, Path]:
+    outputs: dict[str, Path] = {}
+    if "metric_group" not in long_frame.columns:
+        vocabulary_frame = pd.DataFrame(columns=long_frame.columns)
+    else:
+        vocabulary_frame = long_frame[long_frame["metric_group"].astype(str).str.startswith("vocabulary_")].copy()
+
+    def filtered(group: str) -> pd.DataFrame:
+        if vocabulary_frame.empty:
+            return pd.DataFrame(columns=vocabulary_frame.columns)
+        return vocabulary_frame[vocabulary_frame["metric_group"] == group].copy()
+
+    datasets = {
+        "vocabulary_v2_metrics": vocabulary_frame,
+        "occupation_coverage": filtered("vocabulary_occupation_coverage"),
+        "occupation_distribution": filtered("vocabulary_occupation_distribution"),
+        "occupation_income_summary": filtered("vocabulary_occupation_income"),
+        "invalid_education_occupation": filtered("vocabulary_invalid_education_occupation"),
+        "invalid_age_occupation": filtered("vocabulary_invalid_age_occupation"),
+        "rare_occupation_coverage": filtered("vocabulary_rare_occupation"),
+    }
+    if export_parquet:
+        for name, frame in datasets.items():
+            path = benchmark_dir / f"{name}.parquet"
+            frame.to_parquet(path, index=False)
+            outputs[f"{name}_parquet"] = path
+    if export_csv:
+        for name, frame in datasets.items():
+            path = benchmark_dir / f"{name}.csv"
+            frame.to_csv(path, index=False)
+            outputs[f"{name}_csv"] = path
+    if export_json:
+        payload = {
+            "summary": _json_safe_records(summary_frame),
+            "interpretation": (
+                "Benchmark de qualidade do vocabulário 2. Métricas raw usam a saída diagnóstica imediata "
+                "do sintetizador salvo; métricas final usam o resultado pós-processado e validado pelo pipeline."
+            ),
+        }
+        outputs["raw_vs_final_summary_json"] = write_json(payload, benchmark_dir / "raw_vs_final_summary.json")
+    return outputs
+
+
+def _json_safe_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Converte registros tabulares para JSON sem valores não finitos."""
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        if isinstance(value, tuple):
+            return [clean(item) for item in value]
+        if pd.isna(value):
+            return None
+        return value
+
+    return [clean(record) for record in frame.to_dict(orient="records")]
 
 
 def _benchmark_manifest(
