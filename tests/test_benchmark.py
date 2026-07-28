@@ -524,6 +524,20 @@ class BenchmarkTest(unittest.TestCase):
             benchmark_matrix(config),
         )
 
+    def test_ctgan_refinement_config_validation_and_exact_sizes(self) -> None:
+        config = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-capacity-ctgan-refinement.yaml"))
+        self.assertEqual(config["benchmark"]["name"], "capacity-ctgan-refinement")
+        self.assertEqual(config["benchmark"]["type"], "capacity")
+        self.assertEqual(config["benchmark"]["models"], ["ctgan"])
+        self.assertNotIn("programmatic", config["benchmark"]["models"])
+        self.assertNotIn("simple_gan", config["benchmark"]["models"])
+        self.assertEqual(config["benchmark"]["train_sizes"], [4800000])
+        self.assertEqual(holdout_rows_for_train_size(4800000, 0.20), 1200000)
+        self.assertEqual(
+            benchmark_matrix(config),
+            [{"model": "ctgan", "seed": 41, "train_size": 4800000, "holdout_size": 1200000, "calibration_rows": 6000000}],
+        )
+
     def test_capacity_split_exact_sizes_for_configured_matrix(self) -> None:
         for train_size, holdout_size in [(50000, 12500), (100000, 25000), (200000, 50000)]:
             calibration = pd.DataFrame({"row": range(train_size + holdout_size)})
@@ -718,6 +732,20 @@ class BenchmarkTest(unittest.TestCase):
         self.assertIn("pelo menos 1.600.000", limits[0]["conclusion"])
         self.assertIn("limite máximo absoluto não foi determinado", limits[0]["conclusion"])
 
+    def test_ctgan_refinement_interval_when_resource_failure_occurs(self) -> None:
+        rows = [
+            {"model": "ctgan", "train_size": 3200000, "status": "completed"},
+            {"model": "ctgan", "train_size": 4800000, "status": "resource_limited", "failure_type": "OSError"},
+            {"model": "ctgan", "train_size": 6400000, "status": "skipped_after_failure"},
+        ]
+        limits = calculate_capacity_limits(rows, ["ctgan"], [3200000, 4800000, 6400000])
+        self.assertEqual(limits[0]["largest_tested_successful_size"], 3200000)
+        self.assertEqual(limits[0]["first_failed_size"], 4800000)
+        self.assertEqual(limits[0]["first_failure_status"], "resource_limited")
+        self.assertEqual(limits[0]["first_failure_type"], "OSError")
+        self.assertEqual(limits[0]["observed_interval_lower"], 3200000)
+        self.assertEqual(limits[0]["observed_interval_upper"], 4800000)
+
     def test_capacity_subprocess_writes_logs_exit_code_and_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -826,6 +854,37 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(row["failure_type"], "MissingWorkerResult")
         self.assertEqual(row["exit_code"], 7)
 
+    def test_capacity_winerror_1450_is_classified_as_resource_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result_path = root / "result.json"
+            result_path.write_text("{}", encoding="utf-8")
+            row = _capacity_row_from_worker_payload(
+                benchmark_id="bench",
+                model="ctgan",
+                seed=41,
+                train_size=6400000,
+                holdout_size=1600000,
+                calibration_rows=8000000,
+                calibration_timings={},
+                payload={
+                    "technical_status": "failed",
+                    "failure_stage": "pipeline",
+                    "failure_type": "OSError",
+                    "message": "[WinError 1450] Não existem recursos de sistema suficientes para concluir o serviço solicitado",
+                    "backend": "ctgan",
+                    "environment": {"library_versions": {"ctgan": "0.12.1"}, "gpu": {}, "python_version": sys.version, "platform": sys.platform},
+                },
+                execution={"exit_code": 4, "duration_seconds": 10.0, "memory_initial_mb": 1.0, "peak_memory_mb": 2.0, "memory_incremental_mb": 1.0},
+                stdout_path=root / "stdout.log",
+                stderr_path=root / "stderr.log",
+                result_path=result_path,
+            )
+        self.assertEqual(row["status"], "resource_limited")
+        self.assertEqual(row["failure_type"], "OSError")
+        self.assertEqual(row["failure_stage"], "pipeline")
+        self.assertIn("WinError 1450", row["failure_message"])
+
     def test_capacity_missing_result_records_cautious_failure_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -868,9 +927,12 @@ class BenchmarkTest(unittest.TestCase):
         document = (ROOT / "docs" / "benchmark.md").read_text(encoding="utf-8")
         self.assertIn("## Fronteira superior de capacidade observada", document)
         self.assertIn("configs/benchmark-capacity-upper.yaml", document)
+        self.assertIn("configs/benchmark-capacity-ctgan-refinement.yaml", document)
         self.assertIn("`completed`", document)
         self.assertIn("`skipped_after_failure`", document)
         self.assertIn("limite máximo absoluto não foi determinado", document)
+        self.assertIn("Encerramento da busca de capacidade do sintetizador programático", document)
+        self.assertIn("12.800.000 registros", document)
 
     @unittest.skipUnless(os.environ.get("RUN_SLOW_MODEL_TESTS") == "1", "slow optional benchmark test")
     def test_real_three_model_smoke_benchmark(self) -> None:

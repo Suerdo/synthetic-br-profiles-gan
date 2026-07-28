@@ -777,6 +777,8 @@ def _capacity_row_from_worker_payload(
         failure_stage = payload.get("failure_stage")
         failure_type = payload.get("failure_type")
         quality_status = payload.get("quality_status")
+        if status == "failed" and _is_resource_exhaustion_failure(failure_type, payload.get("message")):
+            status = "resource_limited"
 
     stage = payload.get("stage_durations", {}) if payload else {}
     env = payload.get("environment", {}) if payload else environment_info()
@@ -853,6 +855,25 @@ def _capacity_failure_message(payload: dict[str, Any] | None, execution: dict[st
             "Os registros disponíveis não permitem determinar com segurança a causa raiz."
         )
     return None
+
+
+def _is_resource_exhaustion_failure(failure_type: Any, message: Any) -> bool:
+    normalized_type = str(failure_type or "")
+    normalized_message = str(message or "").casefold()
+    if normalized_type == "MemoryError":
+        return True
+    if normalized_type != "OSError":
+        return False
+    resource_fragments = [
+        "winerror 1450",
+        "recursos de sistema suficientes",
+        "insufficient system resources",
+        "not enough memory",
+        "cannot allocate memory",
+        "out of memory",
+        "resource exhausted",
+    ]
+    return any(fragment in normalized_message for fragment in resource_fragments)
 
 
 def _backend_version(model: str, versions: dict[str, Any]) -> str | None:

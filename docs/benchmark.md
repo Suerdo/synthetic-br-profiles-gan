@@ -323,7 +323,8 @@ Esta etapa amplia o benchmark de capacidade operacional para localizar a primeir
 As configurações são:
 
 - `configs/benchmark-capacity-upper-smoke.yaml`: validação técnica com `programmatic` e `ctgan`, uma seed, 400.000 registros de treinamento e 100 registros sintéticos;
-- `configs/benchmark-capacity-upper.yaml`: execução principal com `programmatic` e `ctgan`, uma seed, tamanhos de 400.000, 800.000 e 1.600.000 registros de treinamento e 1.000 registros sintéticos.
+- `configs/benchmark-capacity-upper.yaml`: execução principal com `programmatic` e `ctgan`, uma seed, tamanhos de 400.000, 800.000 e 1.600.000 registros de treinamento e 1.000 registros sintéticos;
+- `configs/benchmark-capacity-ctgan-refinement.yaml`: refinamento final exclusivo da CTGAN com 4.800.000 registros de treinamento, 1.200.000 registros de holdout e 6.000.000 registros de calibração.
 
 Executar o smoke da fronteira superior:
 
@@ -339,6 +340,13 @@ python -m synthetic_br_profiles_gan benchmark \
   --config configs/benchmark-capacity-upper.yaml
 ```
 
+Executar o refinamento final exclusivo da CTGAN:
+
+```bash
+python -m synthetic_br_profiles_gan benchmark \
+  --config configs/benchmark-capacity-ctgan-refinement.yaml
+```
+
 Com `holdout_fraction: 0.20`, os tamanhos exatos são:
 
 | Treino | Holdout | Calibração total |
@@ -346,6 +354,7 @@ Com `holdout_fraction: 0.20`, os tamanhos exatos são:
 | 400.000 | 100.000 | 500.000 |
 | 800.000 | 200.000 | 1.000.000 |
 | 1.600.000 | 400.000 | 2.000.000 |
+| 4.800.000 | 1.200.000 | 6.000.000 |
 
 A progressão permanece independente por modelo. Se a CTGAN falhar em 800.000 registros, 1.600.000 registros serão marcados como `skipped_after_failure` apenas para a CTGAN. O modelo programático continuará a progressão configurada, desde que o tamanho anterior desse modelo tenha sido tecnicamente concluído.
 
@@ -403,12 +412,14 @@ Execução documentada:
 Rodadas adicionais executadas em configurações separadas:
 
 - `capacity-upper-bound-20260727T223209Z-8cc6eb01`: teste exclusivo de 3.200.000 registros de treinamento, com 800.000 registros de holdout e 4.000.000 registros de calibração;
-- `capacity-upper-bound-20260727T233618Z-c6a38d16`: teste exclusivo de 6.400.000 registros de treinamento, com 1.600.000 registros de holdout e 8.000.000 registros de calibração.
+- `capacity-upper-bound-20260727T233618Z-c6a38d16`: teste exclusivo de 6.400.000 registros de treinamento, com 1.600.000 registros de holdout e 8.000.000 registros de calibração;
+- `capacity-ctgan-refinement-20260728T001319Z-1dd7fa14`: refinamento final exclusivo da CTGAN com 4.800.000 registros de treinamento, 1.200.000 registros de holdout e 6.000.000 registros de calibração.
 
 | Modelo | Treino | Holdout | Status técnico | Status de qualidade | Tempo de treino | Duração total | Pico de RSS | Tamanho do modelo |
 | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
 | `programmatic` | 3.200.000 | 800.000 | `completed` | `approved` | 0,232 s | 31,872 s | 5.843,4 MiB | 0,01 MiB |
 | `ctgan` | 3.200.000 | 800.000 | `completed` | `approved` | 2.446,593 s | 2.486,856 s | 20.905,9 MiB | 197,17 MiB |
+| `ctgan` | 4.800.000 | 1.200.000 | `completed` | `approved` | 1.473,487 s | 1.525,077 s | 24.305,2 MiB | 294,83 MiB |
 | `programmatic` | 6.400.000 | 1.600.000 | `completed` | `approved` | 0,490 s | 61,440 s | 8.180,7 MiB | 0,01 MiB |
 | `ctgan` | 6.400.000 | 1.600.000 | `failed` | não aplicável | não concluído | 858,097 s até a falha | 22.140,0 MiB | não produzido |
 
@@ -423,17 +434,37 @@ Rodadas adicionais executadas em configurações separadas:
 
 #### CTGANSynthesizer, situação consolidada
 
-- Maior tamanho concluído: 3.200.000 registros de treinamento.
+- Maior tamanho concluído: 4.800.000 registros de treinamento.
 - Primeira falha observada: 6.400.000 registros de treinamento.
-- Status da primeira falha: `failed`.
+- Status registrado no artefato histórico da primeira falha: `failed`; interpretação operacional: limitação de recursos.
 - Estágio registrado: `pipeline`.
 - Tipo da falha: `OSError`.
 - Código de saída do worker: `4`.
-- Evidências: `result.json` foi produzido, `failure_message` registrou `[WinError 1450] Não existem recursos de sistema suficientes para concluir o serviço solicitado`, o pico de RSS observado foi de 22.140,0 MiB e `failures.json` registrou a falha.
-- Interpretação: a CTGAN foi executada com sucesso até 3.200.000 registros neste ambiente. A primeira falha foi observada em 6.400.000 registros. O limite máximo absoluto não foi determinado.
-- Intervalo operacional observado: entre 3.200.000 e 6.400.000 registros neste ambiente, sob os hiperparâmetros e versões utilizados.
+- Evidências da falha em 6.400.000: `result.json` foi produzido, `failure_message` registrou `[WinError 1450] Não existem recursos de sistema suficientes para concluir o serviço solicitado`, o pico de RSS observado foi de 22.140,0 MiB e `failures.json` registrou a falha. Essa mensagem indica limitação operacional de recursos, preservando `OSError` como tipo original da exceção.
+- Evidências do sucesso em 4.800.000: `result.json` foi produzido, `exit_code` foi `0`, o status técnico foi `completed`, o status de qualidade foi `approved`, o tempo de treinamento foi de 1.473,487 s e o pico de RSS observado foi de 24.305,2 MiB.
+- Interpretação: a CTGAN foi executada com sucesso até 4.800.000 registros neste ambiente. A primeira falha por insuficiência de recursos foi observada em 6.400.000 registros. O limite máximo absoluto não foi determinado.
+- Intervalo operacional observado: entre 4.800.000 e 6.400.000 registros neste ambiente, sob os hiperparâmetros e versões utilizados.
+- Encerramento: a busca de capacidade da CTGAN foi encerrada após esse refinamento final. Não foram executados tamanhos intermediários adicionais.
 
-Para refinar a fronteira operacional observada da CTGAN, o próximo tamanho intermediário recomendado é 4.800.000 registros de treinamento. Para o modelo programático, que ainda não apresentou falha até 6.400.000 registros, o próximo patamar de exploração seria 12.800.000 registros. Nenhum desses tamanhos foi executado automaticamente nesta documentação.
+A CTGAN foi executada com sucesso com até 4.800.000 registros de treinamento no ambiente avaliado. A primeira falha por insuficiência de recursos foi observada em 6.400.000 registros. Assim, a fronteira operacional observada ficou entre 4.800.000 e 6.400.000 registros. Esse intervalo depende do hardware, do sistema operacional, das versões das bibliotecas e dos hiperparâmetros utilizados, não devendo ser interpretado como limite máximo absoluto do modelo.
+
+### Situação consolidada dos três modelos
+
+| Modelo | Maior sucesso observado | Primeira falha observada | Interpretação |
+| --- | ---: | ---: | --- |
+| Programático | 6.400.000 | nenhuma | Busca encerrada por decisão metodológica |
+| CTGAN | 4.800.000 | 6.400.000 | Fronteira refinada |
+| GAN simples | 100.000 | 200.000 | Falha técnica observada |
+
+### Encerramento da busca de capacidade do sintetizador programático
+
+O `ProgrammaticSynthesizer` foi executado com sucesso com 6.400.000 registros de treinamento equivalentes no ambiente avaliado. Como esse sintetizador não possui etapa real de treinamento neural, sua principal limitação está associada à materialização e ao processamento dos dados em memória, e não à capacidade de aprendizagem de um modelo generativo.
+
+O consumo observado nesse modelo decorre principalmente da criação do dataset de calibração, da materialização de DataFrames, do armazenamento de strings e colunas categóricas, da criação do conjunto de holdout, da serialização em Parquet, do pós-processamento dos perfis e da disponibilidade geral de memória do ambiente.
+
+Por esse motivo, não será realizado, nesta fase, o teste com 12.800.000 registros. Encontrar o ponto em que o ambiente deixa de materializar DataFrames, strings, colunas categóricas, holdout e artefatos Parquet possui menor valor científico para os objetivos atuais do projeto do que caracterizar a fronteira operacional da CTGAN.
+
+Essa decisão é metodológica, não uma limitação conhecida do código. O valor de 6.400.000 registros representa apenas o maior tamanho testado com sucesso. O limite máximo absoluto do sintetizador programático não foi determinado.
 
 ## Estados e falhas
 
