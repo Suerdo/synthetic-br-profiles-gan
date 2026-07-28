@@ -10,6 +10,7 @@ Princípios adotados:
 - validação estrutural sem consulta oficial;
 - avaliação de utilidade e indicadores de risco de memorização;
 - rastreabilidade por configuração, run id, hashes e manifestos.
+- auditoria sanitizada dos eventos da interface, sem registrar valores individuais gerados.
 
 Dados sintéticos não devem ser automaticamente considerados anonimizados. As métricas de privacidade do pipeline são indicadores e não substituem avaliação jurídica, relatório de impacto, governança institucional ou auditoria.
 
@@ -35,3 +36,92 @@ Uso proibido:
 - engenharia social;
 - interação com serviços reais;
 - tomada de decisão sobre pessoas.
+
+## Governança da interface
+
+A interface Streamlit possui uma página `Governança` dedicada a consolidar evidências locais. Ela lê manifestos, histórico de modelos, relatórios de validação, quality gates e eventos sanitizados. Quando uma informação não existe, a interface usa explicitamente `Não disponível`, `Não avaliado` ou `Sem execução registrada`.
+
+Os indicadores exibidos são evidências operacionais, não certificações. Exemplos:
+
+- status do pipeline com base nos manifestos encontrados;
+- artefatos de modelo e sua situação (`approved`, `smoke`, `experimental`, `candidate` ou `legacy`);
+- versão do vocabulário categórico;
+- validação estrutural mais recente;
+- indicadores de duplicidade e privacidade quando disponíveis;
+- histórico filtrável por tipo, modelo e status;
+- trilha de auditoria sanitizada.
+
+## Origem das métricas
+
+Cada bloco da página informa a fonte esperada:
+
+- resumo operacional: manifesto de execução e `quality_gates.json`;
+- qualidade dos dados: `validation.json`, `quality_gates.json` e manifesto de execução;
+- privacidade: `evaluation.json` e métricas de privacidade disponíveis;
+- execuções recentes: manifestos de execução, benchmark, treinamento e geração da interface;
+- auditoria: `artifacts/ui_audit/events.jsonl`.
+
+Ausência de métrica não é exibida como zero. A interface usa `Não avaliado` e informa que a execução não produziu aquela métrica. Zero é reservado para valores reais registrados como zero.
+
+## Glossário dos indicadores
+
+**Execuções registradas:** quantidade de manifestos de execução identificados pela aplicação.
+
+**Aprovadas:** execuções sem falha nos quality gates obrigatórios.
+
+**Em quarentena:** execuções tecnicamente concluídas, mas com alertas ou falhas em métricas informativas.
+
+**Rejeitadas:** execuções que falharam em pelo menos um gate obrigatório.
+
+**Linhas válidas:** linhas que passaram por todas as validações estruturais do schema final.
+
+**Linhas inválidas:** linhas com problemas de domínio, consistência, nulidade, documento ou relacionamento estrutural.
+
+**Identificadores duplicados:** repetições encontradas em CPF, CNH, RG, título de eleitor ou telefone dentro da mesma geração.
+
+**Cobertura de ocupações:** proporção das ocupações canônicas reproduzidas pelo modelo na amostra avaliada.
+
+**Distância de variação total:** diferença entre distribuições categóricas do conjunto sintético e da referência. Quanto menor, mais próximas estão as distribuições comparadas.
+
+**Diferença de correlação:** maior diferença observada nas relações entre variáveis numéricas.
+
+**Exact train match rate:** proporção de registros sintéticos cujas colunas-base coincidem exatamente com registros do treinamento.
+
+**Risco de privacidade:** classificação derivada de métricas explícitas disponíveis. Não constitui garantia de anonimização.
+
+**Status operacional:** situação técnica da execução mais recente identificada.
+
+## Auditoria sanitizada
+
+Eventos da interface são registrados em:
+
+```text
+artifacts/ui_audit/events.jsonl
+```
+
+Eventos previstos:
+
+- `session_started`;
+- `page_viewed`;
+- `model_selected`;
+- `generation_requested`;
+- `generation_succeeded`;
+- `generation_failed`;
+- `dataset_download_requested`;
+- `manifest_download_requested`.
+
+A auditoria registra apenas metadados operacionais, como modelo, quantidade solicitada, formato, seed, modo de seleção de colunas, duração e tipo de erro. Ela não registra CPF, CNH, RG, título de eleitor, telefone, nome, linhas geradas, dataset, traceback completo, IP, user agent ou identidade de usuário.
+
+Falhas de escrita do arquivo de auditoria são registradas em log e não invalidam a geração. Em ambiente institucional, a equipe responsável deve definir retenção, proteção, rotação e revisão desses arquivos.
+
+## Artefatos de modelo
+
+Artefatos neurais aparecem na tela `Gerar dados` quando são tecnicamente válidos: manifesto legível, modelo reconhecido, arquivos obrigatórios presentes, schema compatível e diretório dentro da raiz administrada. A aprovação não é usada como bloqueio automático de exibição; ela aparece como status do artefato.
+
+Artefatos `smoke`, `experimental`, `candidate` ou `legacy` recebem avisos específicos. O artefato mais recente de cada modelo neural é selecionado por padrão na tela de geração, mas recência não significa melhor qualidade, aprovação ou recomendação.
+
+A página `Governança` não exibe mais a seção visual `Modelos e versões`. Essa remoção é apenas visual e não altera `ModelRegistry`, manifestos ou seleção de artefatos.
+
+## Conteúdo regulatório
+
+O conteúdo regulatório detalhado permanece documentado em `docs/compliance.md`. A página `Governança` da interface foi simplificada e não exibe matriz regulatória ou seção separada de conformidade.

@@ -1,16 +1,16 @@
 # Interface Streamlit
 
-A interface Streamlit é a primeira camada visual do projeto. Ela reutiliza os serviços existentes de geração, catálogo de colunas, presets, validação estrutural, exportação e manifestos. A página não implementa regras próprias de documentos, pós-processamento, validação ou serialização.
+A interface Streamlit é a camada visual da plataforma. Ela reutiliza `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação e manifestos. A aplicação não implementa regras próprias de geração de CPF, documentos, pós-processamento, validação ou serialização.
 
 ## Instalação
 
-A dependência da interface é opcional. Para instalar:
+A dependência da interface é opcional:
 
 ```bash
 pip install -e ".[ui]"
 ```
 
-A instalação básica do pacote continua disponível sem Streamlit:
+A instalação básica continua disponível sem Streamlit:
 
 ```bash
 pip install -e .
@@ -24,64 +24,64 @@ Execute:
 streamlit run app/streamlit_app.py
 ```
 
-O ponto de entrada fica em `app/streamlit_app.py`. A lógica reutilizável da interface fica em `src/synthetic_br_profiles_gan/ui/`.
+O ponto de entrada fica em `app/streamlit_app.py`. Os componentes reutilizáveis ficam em `src/synthetic_br_profiles_gan/ui/`.
 
 ## Configuração
 
-A configuração fica em `configs/ui.yaml`.
+A configuração fica em `configs/ui.yaml`. Ela define título, subtítulo, diretórios administrados, limites operacionais da interface, seed padrão, formato padrão, artefatos neurais aprovados, caminho da auditoria e data de revisão do conteúdo regulatório.
 
-Ela define:
+Os limites de linhas são operacionais para uso interativo. Eles não representam a capacidade máxima absoluta dos modelos e não devem ser confundidos com benchmarks de capacidade.
 
-- título da aplicação;
-- quantidade de linhas exibidas na amostra;
-- diretório administrado de modelos em `artifacts/models`;
-- diretório de sessões em `artifacts/ui_sessions`;
-- quantidade padrão de registros;
-- limites operacionais por modelo;
-- modelo, preset, formato e seed padrão.
+## Navegação
 
-Os limites de linhas da interface são limites operacionais de uso interativo. Eles não representam a capacidade máxima absoluta dos modelos e não devem ser confundidos com benchmarks de capacidade.
+A aplicação possui três áreas:
 
-## Telas
+- `Gerar dados`: formulário principal de geração.
+- `Modelos`: explicação didática e técnica dos três sintetizadores.
+- `Governança`: histórico, indicadores, quality gates, auditoria sanitizada e glossário de interpretação.
 
-### Gerar dados
+`Gerar dados` é a página inicial. A navegação usa menu lateral com fundo azul-marinho, item ativo destacado e a marca visual `Dados Sintéticos Brasileiro`. A sidebar termina após os itens de navegação, sem rodapé informativo.
 
-A tela principal permite escolher:
+Títulos e subtítulos estruturais usam capitalização com iniciais maiúsculas nas palavras principais, como `Resumo Operacional`, `Qualidade dos Dados`, `Execuções Recentes`, `Resumo Simples` e `Resumo Técnico`. Labels funcionais de formulário podem permanecer em frase natural, como `Quantidade de registros`.
 
-- modelo;
-- artefato treinado, quando necessário;
-- quantidade de registros;
-- formato de saída;
-- seed;
-- preset ou seleção personalizada de colunas.
+## Geração
 
-Ao acionar `Gerar dados sintéticos`, a interface cria um diretório exclusivo, constrói um `GenerationRequest` e chama o `GenerationService`.
+A tela `Gerar dados` organiza o fluxo em seis etapas:
 
-### Conheça os modelos
+1. Escolha do modelo.
+2. Volume e Reprodutibilidade.
+3. Seleção de colunas.
+4. Formato de saída.
+5. Revisão antes da execução.
+6. Execução e downloads.
 
-Apresenta os três sintetizadores:
-
-| Modelo | Treinamento | Custo | Situação |
-| --- | --- | --- | --- |
-| Programático | Não exige | Baixo | Recomendado |
-| CTGAN | Exige | Alto | Avançado |
-| GAN simples | Exige | Médio | Experimental |
-
-Essas descrições são didáticas e não transformam resultados experimentais em garantias universais.
-
-### Sobre e governança
-
-Explica a finalidade acadêmica, o fluxo de geração, a seleção de colunas, a validade estrutural, a segurança de modelos serializados e as limitações de uso.
+Ao clicar em `Gerar dados sintéticos`, a interface cria um diretório exclusivo, constrói um `UIGenerationRequest` e chama o serviço de geração. O Streamlit não duplica lógica de negócio.
 
 ## Modelos e artefatos
 
-O modelo `programmatic` está sempre disponível e não exige treinamento prévio.
+O modelo `programmatic` fica sempre disponível e não exige treinamento.
 
-`ctgan` e `simple_gan` exigem artefatos previamente treinados. A interface lista somente diretórios válidos encontrados dentro de `artifacts/models`, com `training_manifest.json` compatível e arquivos obrigatórios do modelo.
+`ctgan` e `simple_gan` ficam disponíveis na tela de geração quando há artefatos tecnicamente válidos no diretório administrado. Um artefato aparece quando o manifesto pode ser lido, o tipo de modelo é reconhecido, os arquivos obrigatórios existem, o schema é compatível e o diretório permanece dentro de `artifacts/models`.
+
+A ausência de status `approved` não bloqueia automaticamente a exibição. Em vez disso, a interface mostra a finalidade do artefato:
+
+- `Aprovado`;
+- `Candidato`;
+- `Experimental`;
+- `Smoke`;
+- `Legado`;
+- `Sem classificação`.
+
+Ao selecionar `ctgan` ou `simple_gan`, o artefato mais recente do modelo é pré-selecionado por `created_at_utc` do manifesto. Quando não houver data temporal no manifesto, a aplicação usa metadados temporais disponíveis e, por último, uma data segura do arquivo. O badge `Mais recente` indica apenas recência, não melhor qualidade nem aprovação.
 
 A interface não permite upload de `.pkl`, `.keras`, `.json` ou outros artefatos de modelo. Também não permite que o usuário informe caminhos arbitrários. Modelos serializados devem ser produzidos ou previamente aprovados pela própria aplicação.
 
-Quando um artefato neural foi treinado com a versão anterior do vocabulário categórico, a interface mostra um aviso. A saída terá acentuação normalizada por aliases legados, mas o modelo não conhecerá automaticamente as ocupações adicionadas na versão atual. Para obter toda a diversidade do vocabulário `2`, o artefato precisa ser treinado novamente com a base de calibração atual.
+Avisos por finalidade:
+
+- `Smoke`: treinado apenas para validação técnica e não representa modelo de produção.
+- `Experimental`: finalidade experimental; métricas devem ser avaliadas antes de uso crítico.
+- `Legado`: treinado com versão anterior do vocabulário; a saída será normalizada, mas pode apresentar menor diversidade de ocupações.
+- `Candidato`: artefato em avaliação, ainda não definido como modelo neural padrão.
 
 ## Seleção de colunas
 
@@ -96,39 +96,41 @@ geração interna das 18 colunas
   → exportação
 ```
 
-No modo `Preset`, a interface usa os presets existentes em `column_catalog.py`:
+No modo `Preset`, a interface usa os presets existentes em `column_catalog.py`: `completo`, `demografico`, `contato`, `documentos` e `minimo`.
 
-- `completo`;
-- `demografico`;
-- `contato`;
-- `documentos`;
-- `minimo`.
-
-No modo personalizado, as colunas são apresentadas por grupo:
-
-- Identificação sintética;
-- Demografia;
-- Localização e contato;
-- Perfil socioeconômico.
-
-Dependências internas, como `Telefone` depender de `Estado` e `DDD`, continuam sendo geradas para preservar a coerência dos perfis. Elas não são adicionadas automaticamente ao arquivo exportado.
+No modo personalizado, as colunas são agrupadas em `Identificação sintética`, `Demografia`, `Localização e contato` e `Perfil socioeconômico`. Dependências internas continuam sendo geradas para preservar a coerência dos perfis, mas não são adicionadas automaticamente ao arquivo exportado.
 
 ## Formatos e downloads
 
 Formatos disponíveis:
 
-- `csv`: compatível com planilhas e ferramentas de análise, gravado em `utf-8-sig` e separador `;`;
-- `json`: adequado para integrações e desenvolvimento;
-- `parquet`: indicado para análise de dados com preservação de tipos.
+- `csv`: gravado em `utf-8-sig`, sem índice e com separador `;`;
+- `json`: lista de objetos em UTF-8 com `ensure_ascii=False`;
+- `parquet`: preserva tipos sempre que possível.
 
-Após a geração, a interface apresenta:
+Após a geração, a interface apresenta resumo, amostra limitada por `preview_rows`, colunas exportadas, validação estrutural e botões para baixar o dataset e o manifesto.
 
-- resumo da execução;
-- amostra limitada por `preview_rows`;
-- colunas exportadas;
-- visão amigável da validação estrutural;
-- botão para baixar o dataset;
-- botão para baixar o manifesto.
+Os botões de download são apresentados lado a lado, com largura visual semelhante e próximos entre si para reduzir deslocamento visual.
+
+## Campos do formulário
+
+Os campos de configuração da geração usam primeiro o tema oficial do Streamlit, definido em `.streamlit/config.toml`. A opção `secondaryBackgroundColor = "#E8EEF7"` dá aos widgets um fundo azul-acinzentado claro, `borderColor = "#64748B"` define a borda visível e `showWidgetBorder = true` mantém a borda mesmo sem foco. A cor `primaryColor = "#1E3A8A"` orienta o foco e elementos selecionados.
+
+Os `number_input`, como `Quantidade de registros` e `Seed`, devem aparecer como caixas delimitadas, com steppers visíveis. Os `selectbox`, como `Preset`, `Formato`, `Tipo`, `Modelo` e `Status`, usam fundo e borda do tema, mantendo seta de dropdown contrastada e área clicável confortável.
+
+O CSS interno da interface é usado para layout, sidebar, cards, seções e destaques. Ele não redefine genericamente `input`, `selectbox`, `multiselect` ou elementos internos BaseWeb. Qualquer CSS adicional para widgets deve ser tratado como fallback restrito e documentado.
+
+## Auditoria
+
+A interface registra eventos sanitizados em:
+
+```text
+artifacts/ui_audit/events.jsonl
+```
+
+Eventos registrados incluem `session_started`, `page_viewed`, `model_selected`, `generation_requested`, `generation_succeeded`, `generation_failed`, `dataset_download_requested` e `manifest_download_requested`.
+
+A auditoria não registra linhas geradas, CPF, nomes, telefones, datasets, traceback completo, IP, user agent ou identidade de usuário. Falhas de escrita da auditoria não invalidam uma geração.
 
 ## Diretórios temporários
 
@@ -138,21 +140,13 @@ Cada geração usa um diretório exclusivo em:
 artifacts/ui_sessions/<session-id>/<generation-id>/
 ```
 
-Esta primeira versão não implementa histórico persistente nem limpeza automática. A equipe responsável pode remover os diretórios de sessões periodicamente. Os artefatos gerados pela interface não devem ser versionados.
+Esta primeira versão não implementa histórico persistente nem limpeza automática. A equipe responsável deve definir uma política de retenção e remoção desses arquivos em ambiente institucional.
 
 ## Governança
 
-Os dados gerados são sintéticos e não foram consultados ou validados em bases oficiais. A validade estrutural de documentos não comprova existência, regularidade ou associação a uma pessoa real.
+A página de governança lê evidências reais de manifestos e eventos locais. Quando não houver dado suficiente, exibe `Não disponível`, `Não avaliado` ou `Sem execução registrada`. Cada bloco informa a origem esperada, como `manifesto de execução`, `validation.json`, `quality_gates.json`, `evaluation.json` ou `generation.json`.
 
-A ferramenta auxilia testes, ensino e pesquisa, mas não oferece garantia absoluta de anonimização ou ausência de coincidências com informações reais.
-
-Os dados não devem ser usados para fraude, autenticação, identificação real, criação de contas, engenharia social ou acesso a serviços.
-
-## Vocabulário e labels
-
-Os nomes técnicos das colunas continuam sem acento por compatibilidade com modelos, CLI, manifestos, presets e código externo. A interface apresenta labels em português brasileiro, como `Gênero`, `Região`, `Município`, `Ocupação`, `Título de eleitor`, `Estado civil` e `Data de nascimento`.
-
-Os valores categóricos exportados usam português brasileiro canônico, normalização Unicode NFC e vocabulário categórico `2`. Isso inclui escolaridade, estado civil, ocupações e municípios com acentuação. A interface não remove acentos nem converte os dados para ASCII.
+A página foi simplificada para concentrar `Resumo Operacional`, `Qualidade dos Dados`, `Privacidade`, `Execuções Recentes`, `Auditoria` e `Como interpretar os indicadores`. As seções principais usam containers com borda, fundo claro, padding consistente e títulos no topo. O histórico visual de artefatos e a matriz regulatória não fazem parte dessa tela. Consulte `docs/governance.md` para o glossário operacional e `docs/compliance.md` para referências regulatórias.
 
 ## Limitações
 
@@ -160,16 +154,5 @@ Os valores categóricos exportados usam português brasileiro canônico, normali
 - Não há upload de modelos ou datasets.
 - Não há autenticação, banco de dados, histórico persistente, filas ou geração assíncrona.
 - A interface não executa benchmarks de capacidade.
-- Modelos neurais podem apresentar variações conforme backend, hardware e versões das bibliotecas.
+- Modelos neurais podem variar conforme backend, hardware e versões das bibliotecas.
 - A referência metodológica continua sendo a base de calibração sintética controlada.
-
-## Preparação para implantação institucional
-
-Antes de uma implantação institucional, recomenda-se definir:
-
-- política de retenção e limpeza dos arquivos em `artifacts/ui_sessions`;
-- processo formal de aprovação dos artefatos em `artifacts/models`;
-- limites operacionais por ambiente;
-- controle de acesso;
-- monitoramento local de recursos;
-- revisão de governança e uso responsável.

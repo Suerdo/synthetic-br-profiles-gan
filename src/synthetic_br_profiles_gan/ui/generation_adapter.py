@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -14,6 +15,7 @@ import pandas as pd
 from synthetic_br_profiles_gan.config import ConfigurationError
 from synthetic_br_profiles_gan.models.registry import SavedModelArtifact, list_saved_model_artifacts
 from synthetic_br_profiles_gan.services.generation_service import GenerationRequest, GenerationResult, run_generation
+from synthetic_br_profiles_gan.ui.services.audit_service import write_audit_event
 from synthetic_br_profiles_gan.ui.ui_config import UIConfig, SUPPORTED_UI_FORMATS
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +58,17 @@ def list_available_artifacts(models_root: str | Path) -> dict[str, list[SavedMod
     return grouped
 
 
+def list_generation_artifacts(config: UIConfig) -> dict[str, list[SavedModelArtifact]]:
+    """Lista artefatos tecnicamente válidos para geração, do mais recente para o mais antigo."""
+    grouped = {"programmatic": [], "ctgan": [], "simple_gan": []}
+    for artifact in list_saved_model_artifacts(config.models_root):
+        if artifact.model in {"ctgan", "simple_gan"}:
+            grouped.setdefault(artifact.model, []).append(artifact)
+    for model in grouped:
+        grouped[model].sort(key=_artifact_datetime_key, reverse=True)
+    return grouped
+
+
 def run_ui_generation(request: UIGenerationRequest) -> UIGenerationResult:
     """Valida a solicitação da interface e delega a geração ao serviço."""
     _validate_ui_request(request)
@@ -70,6 +83,21 @@ def run_ui_generation(request: UIGenerationRequest) -> UIGenerationResult:
             "rows": int(request.rows),
             "format": request.output_format,
         },
+    )
+    write_audit_event(
+        request.config.audit_events_path,
+        "generation_requested",
+        payload={
+            "model": request.model,
+            "artifact_id": request.artifact_id,
+            "rows": int(request.rows),
+            "format": request.output_format,
+            "seed": int(request.seed),
+            "column_selection_mode": _column_selection_mode(request),
+            "column_preset": request.column_preset,
+            "exported_column_count": len(request.selected_columns or ()),
+        },
+        session_id=request.session_id,
     )
     try:
         service_result = run_generation(
@@ -96,6 +124,21 @@ def run_ui_generation(request: UIGenerationRequest) -> UIGenerationResult:
                 "duration_seconds": service_result.duration_seconds,
             },
         )
+        write_audit_event(
+            request.config.audit_events_path,
+            "generation_succeeded",
+            payload={
+                "model": service_result.model,
+                "artifact_id": request.artifact_id,
+                "rows": int(request.rows),
+                "format": request.output_format,
+                "seed": int(request.seed),
+                "duration_seconds": service_result.duration_seconds,
+                "status": "completed",
+                "exported_column_count": len(service_result.exported_columns),
+            },
+            session_id=request.session_id,
+        )
         return UIGenerationResult(
             service_result=service_result,
             dataset=dataset,
@@ -110,6 +153,20 @@ def run_ui_generation(request: UIGenerationRequest) -> UIGenerationResult:
         LOGGER.exception(
             "ui_generation_failed",
             extra={"model": request.model, "rows": int(request.rows), "format": request.output_format, "error_type": type(exc).__name__},
+        )
+        write_audit_event(
+            request.config.audit_events_path,
+            "generation_failed",
+            payload={
+                "model": request.model,
+                "artifact_id": request.artifact_id,
+                "rows": int(request.rows),
+                "format": request.output_format,
+                "seed": int(request.seed),
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+            session_id=request.session_id,
         )
         raise
 
@@ -128,11 +185,39 @@ def read_generated_dataset(path: str | Path, output_format: str) -> pd.DataFrame
 
 def artifact_label(artifact: SavedModelArtifact) -> str:
     """Formata um rótulo curto para um artefato disponível."""
-    created = artifact.created_at_utc or "data não registrada"
-    train_rows = "treino não registrado" if artifact.train_rows is None else f"treino {artifact.train_rows}"
-    seed = "seed não registrada" if artifact.seed is None else f"seed {artifact.seed}"
-    vocabulary = f"vocabulário {artifact.categorical_vocabulary_version}"
-    return f"{artifact.artifact_id} · {created} · {train_rows} · {seed} · {vocabulary}"
+    created = _format_artifact_date(artifact)
+    return f"{artifact.artifact_id} — {created} — {artifact_status_label(artifact)}"
+
+
+def artifact_status_label(artifact: SavedModelArtifact) -> str:
+    """Retorna a finalidade/status operacional de um artefato."""
+    status = (artifact.approval_status or artifact.purpose or "").lower()
+    purpose = (artifact.purpose or "").lower()
+    if artifact.is_legacy_vocabulary or status == "legacy" or purpose == "legacy":
+        return "Legado"
+    if status == "approved" or purpose == "approved":
+        return "Aprovado"
+    if status == "candidate" or purpose == "candidate":
+        return "Candidato"
+    if status == "smoke" or purpose == "smoke":
+        return "Smoke"
+    if status == "experimental" or purpose == "experimental":
+        return "Experimental"
+    return "Sem classificação"
+
+
+def artifact_status_warning(artifact: SavedModelArtifact) -> str | None:
+    """Retorna aviso textual para artefatos não operacionais padrão."""
+    label = artifact_status_label(artifact)
+    if label == "Smoke":
+        return "Este artefato foi treinado apenas para validação técnica e não representa um modelo de produção."
+    if label == "Experimental":
+        return "Este artefato possui finalidade experimental. Avalie suas métricas antes de utilizar os dados em atividades críticas."
+    if label == "Legado":
+        return "Este artefato utiliza uma versão anterior do vocabulário. A saída será normalizada, mas poderá apresentar menor diversidade de ocupações."
+    if label == "Candidato":
+        return "Este artefato está em avaliação e ainda não foi definido como modelo neural padrão."
+    return None
 
 
 def validation_summary(validation_report: dict[str, Any]) -> list[tuple[str, bool]]:
@@ -175,7 +260,7 @@ def _validate_ui_request(request: UIGenerationRequest) -> None:
 def _resolve_artifact(request: UIGenerationRequest) -> SavedModelArtifact | None:
     if request.model == "programmatic":
         return None
-    artifacts = list_saved_model_artifacts(request.config.models_root, model=request.model)
+    artifacts = list_generation_artifacts(request.config).get(request.model, [])
     for artifact in artifacts:
         if artifact.artifact_id == request.artifact_id:
             return artifact
@@ -196,3 +281,42 @@ def _dataset_filename(model: str, rows: int, output_format: str) -> str:
 
 def _manifest_filename(model: str, rows: int) -> str:
     return f"perfis-sinteticos-{model}-{int(rows)}.manifest.json"
+
+
+def _column_selection_mode(request: UIGenerationRequest) -> str:
+    if request.column_preset is not None:
+        return "preset"
+    if request.selected_columns is not None:
+        return "explicit"
+    return "all"
+
+
+def _artifact_datetime_key(artifact: SavedModelArtifact) -> datetime:
+    for key in ("created_at_utc", "ended_at_utc", "timestamp_utc"):
+        parsed = _parse_datetime(artifact.manifest.get(key))
+        if parsed is not None:
+            return parsed
+    try:
+        return datetime.fromtimestamp(artifact.artifact_path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _format_artifact_date(artifact: SavedModelArtifact) -> str:
+    parsed = _artifact_datetime_key(artifact)
+    if parsed == datetime.min.replace(tzinfo=timezone.utc):
+        return "data não registrada"
+    return parsed.astimezone(timezone.utc).strftime("%d/%m/%Y")
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

@@ -82,6 +82,8 @@ Valores antigos são normalizados por aliases explícitos, por exemplo:
 
 Modelos neurais antigos continuam carregando quando o schema de colunas é compatível. A saída desses modelos recebe correção de acentuação e normalização Unicode antes da validação, mas eles não passam a produzir automaticamente ocupações adicionadas na versão `2`. Para aprender as novas ocupações, `SimpleTabularGAN` e `CTGANSynthesizer` precisam ser treinados novamente.
 
+Na interface Streamlit, artefatos neurais legados permanecem visíveis no histórico de governança, mas não são usados como opção operacional padrão de geração. Quando houver referência a um artefato legado, a interface deve explicar que a normalização corrige valores textuais conhecidos, mas não amplia o espaço categórico aprendido pelo modelo.
+
 Configurações pequenas para validação técnica do vocabulário `2` estão disponíveis em:
 
 - `configs/train-simple-gan-vocab-v2-smoke.yaml`;

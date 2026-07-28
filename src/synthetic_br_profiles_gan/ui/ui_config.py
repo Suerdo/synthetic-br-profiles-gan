@@ -17,10 +17,15 @@ SUPPORTED_UI_MODELS = ("programmatic", "ctgan", "simple_gan")
 
 DEFAULT_UI_CONFIG: ConfigDict = {
     "application": {
-        "title": "Gerador de Perfis Sintéticos Brasileiros",
+        "title": "Plataforma de Dados Sintéticos Brasileiros",
+        "subtitle": (
+            "Geração, avaliação e governança de perfis sintéticos brasileiros para desenvolvimento, "
+            "testes, pesquisa e Inteligência Artificial responsável."
+        ),
         "preview_rows": 20,
         "models_root": "artifacts/models",
         "sessions_root": "artifacts/ui_sessions",
+        "artifacts_root": "artifacts",
     },
     "generation": {
         "default_rows": 1000,
@@ -37,6 +42,9 @@ DEFAULT_UI_CONFIG: ConfigDict = {
         "format": "csv",
         "seed": 41,
     },
+    "model_artifacts": {"approved": {"ctgan": [], "simple_gan": []}},
+    "audit": {"events_path": "artifacts/ui_audit/events.jsonl"},
+    "compliance": {"legal_content_last_review": "2026-07-28"},
 }
 
 
@@ -45,9 +53,11 @@ class UIConfig:
     """Configuração resolvida da interface de geração."""
 
     title: str
+    subtitle: str
     preview_rows: int
     models_root: Path
     sessions_root: Path
+    artifacts_root: Path
     default_rows: int
     min_rows: int
     limits: dict[str, int]
@@ -55,6 +65,9 @@ class UIConfig:
     default_preset: str
     default_format: str
     default_seed: int
+    approved_model_artifacts: dict[str, tuple[str, ...]]
+    audit_events_path: Path
+    legal_content_last_review: str
     raw: dict[str, Any]
 
 
@@ -68,9 +81,11 @@ def load_ui_config(path: str | Path = "configs/ui.yaml") -> UIConfig:
     defaults = effective["defaults"]
     return UIConfig(
         title=str(application["title"]),
+        subtitle=str(application["subtitle"]),
         preview_rows=int(application["preview_rows"]),
         models_root=Path(application["models_root"]),
         sessions_root=Path(application["sessions_root"]),
+        artifacts_root=Path(application["artifacts_root"]),
         default_rows=int(generation["default_rows"]),
         min_rows=int(generation["min_rows"]),
         limits={model: int(limit) for model, limit in generation["limits"].items()},
@@ -78,22 +93,33 @@ def load_ui_config(path: str | Path = "configs/ui.yaml") -> UIConfig:
         default_preset=str(defaults["preset"]),
         default_format=str(defaults["format"]),
         default_seed=int(defaults["seed"]),
+        approved_model_artifacts={
+            model: tuple(values)
+            for model, values in effective["model_artifacts"]["approved"].items()
+        },
+        audit_events_path=Path(effective["audit"]["events_path"]),
+        legal_content_last_review=str(effective["compliance"]["legal_content_last_review"]),
         raw=effective,
     )
 
 
 def validate_ui_config(config: ConfigDict) -> None:
     """Valida chaves, tipos e limites operacionais da interface."""
-    _reject_unknown(config, {"application", "generation", "defaults"}, "ui")
+    _reject_unknown(config, {"application", "generation", "defaults", "model_artifacts", "audit", "compliance"}, "ui")
     application = _mapping(config.get("application"), "application")
     generation = _mapping(config.get("generation"), "generation")
     defaults = _mapping(config.get("defaults"), "defaults")
+    model_artifacts = _mapping(config.get("model_artifacts"), "model_artifacts")
+    audit = _mapping(config.get("audit"), "audit")
+    compliance = _mapping(config.get("compliance"), "compliance")
 
-    _reject_unknown(application, {"title", "preview_rows", "models_root", "sessions_root"}, "application")
+    _reject_unknown(application, {"title", "subtitle", "preview_rows", "models_root", "sessions_root", "artifacts_root"}, "application")
     if not isinstance(application.get("title"), str) or not application["title"]:
         raise ConfigurationError("application.title deve ser uma string não vazia.")
+    if not isinstance(application.get("subtitle"), str) or not application["subtitle"]:
+        raise ConfigurationError("application.subtitle deve ser uma string não vazia.")
     _positive_int(application, "preview_rows", "application")
-    for key in ("models_root", "sessions_root"):
+    for key in ("models_root", "sessions_root", "artifacts_root"):
         if not isinstance(application.get(key), str) or not application[key]:
             raise ConfigurationError(f"application.{key} deve ser um caminho não vazio.")
 
@@ -120,6 +146,22 @@ def validate_ui_config(config: ConfigDict) -> None:
     _non_negative_int(defaults, "seed", "defaults")
     if int(generation["default_rows"]) > int(limits[str(defaults["model"])]):
         raise ConfigurationError("generation.default_rows excede o limite operacional do modelo padrão.")
+
+    _reject_unknown(model_artifacts, {"approved"}, "model_artifacts")
+    approved = _mapping(model_artifacts.get("approved"), "model_artifacts.approved")
+    _reject_unknown(approved, {"ctgan", "simple_gan"}, "model_artifacts.approved")
+    for model in ("ctgan", "simple_gan"):
+        values = approved.get(model)
+        if not isinstance(values, list) or any(not isinstance(item, str) or not item for item in values):
+            raise ConfigurationError(f"model_artifacts.approved.{model} deve ser uma lista de strings.")
+
+    _reject_unknown(audit, {"events_path"}, "audit")
+    if not isinstance(audit.get("events_path"), str) or not audit["events_path"]:
+        raise ConfigurationError("audit.events_path deve ser um caminho não vazio.")
+
+    _reject_unknown(compliance, {"legal_content_last_review"}, "compliance")
+    if not isinstance(compliance.get("legal_content_last_review"), str) or not compliance["legal_content_last_review"]:
+        raise ConfigurationError("compliance.legal_content_last_review deve ser uma data textual não vazia.")
 
 
 def _mapping(value: Any, context: str) -> ConfigDict:

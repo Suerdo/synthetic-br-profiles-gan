@@ -396,7 +396,7 @@ O notebook em `notebooks/` importa o pacote e demonstra execução, amostra, val
 
 ## Interface Streamlit
 
-A primeira versão da interface Streamlit permite gerar dados sintéticos sem duplicar as regras de negócio do pacote. A página reutiliza `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação e manifestos.
+A interface Streamlit transforma o núcleo do projeto em uma plataforma visual para geração, governança, IA responsável e consulta de evidências operacionais, sem duplicar as regras de negócio do pacote. Ela reutiliza `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação, manifestos e auditoria sanitizada.
 
 Instalar o extra opcional:
 
@@ -410,11 +410,15 @@ Iniciar a aplicação:
 streamlit run app/streamlit_app.py
 ```
 
-A interface permite escolher modelo, quantidade de registros, seed, formato de saída e colunas exportadas. O modelo programático fica disponível diretamente. `ctgan` e `simple_gan` só aparecem como opções geráveis quando há artefatos válidos em `artifacts/models`.
+A aplicação possui três áreas: `Gerar dados`, `Modelos` e `Governança`. `Gerar dados` é a página inicial.
+
+A tela de geração permite escolher modelo, quantidade de registros, seed, formato de saída e colunas exportadas. O modelo programático fica disponível diretamente. `ctgan` e `simple_gan` aparecem quando há artefatos tecnicamente válidos em `artifacts/models`, com manifesto legível, modelo reconhecido, arquivos obrigatórios presentes, schema compatível e diretório dentro da raiz administrada.
 
 A seleção de colunas é aplicada somente depois da geração interna das 18 colunas finais e da validação estrutural completa. A interface não permite upload de modelos nem caminhos arbitrários para artefatos serializados. Consulte `docs/interface.md` para detalhes de instalação, telas, governança, diretórios temporários e limitações.
 
-Quando um artefato neural legado é selecionado, a interface informa que a saída terá acentuação normalizada, mas que o modelo foi treinado com a versão anterior do vocabulário e não conhece as novas ocupações.
+A página de governança lê manifestos, histórico de modelos, validações, quality gates e eventos sanitizados em `artifacts/ui_audit/events.jsonl`. O conteúdo essencial sobre LGPD, ECA Digital e uso seguro foi integrado à governança. Ele é educacional: não constitui parecer jurídico, certificação regulatória, auditoria formal ou garantia de conformidade. Consulte também `docs/governance.md`, `docs/compliance.md` e `docs/design-system.md`.
+
+Ao selecionar `ctgan` ou `simple_gan`, o artefato mais recente daquele modelo é pré-selecionado por `created_at_utc`. Esse critério indica apenas recência, não melhor qualidade nem aprovação. Artefatos `Smoke`, `Experimental`, `Candidato`, `Legado` ou `Sem classificação` aparecem com avisos próprios.
 
 ## Testes
 

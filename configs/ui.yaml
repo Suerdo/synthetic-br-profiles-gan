@@ -1,8 +1,10 @@
 application:
-  title: "Gerador de Perfis Sintéticos Brasileiros"
+  title: "Plataforma de Dados Sintéticos Brasileiros"
+  subtitle: "Geração, avaliação e governança de perfis sintéticos brasileiros para desenvolvimento, testes, pesquisa e Inteligência Artificial responsável."
   preview_rows: 20
   models_root: "artifacts/models"
   sessions_root: "artifacts/ui_sessions"
+  artifacts_root: "artifacts"
 
 generation:
   default_rows: 1000
@@ -17,3 +19,14 @@ defaults:
   preset: completo
   format: csv
   seed: 41
+
+model_artifacts:
+  approved:
+    ctgan: []
+    simple_gan: []
+
+audit:
+  events_path: "artifacts/ui_audit/events.jsonl"
+
+compliance:
+  legal_content_last_review: "2026-07-28"

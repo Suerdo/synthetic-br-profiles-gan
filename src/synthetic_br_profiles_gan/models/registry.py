@@ -63,6 +63,8 @@ class SavedModelArtifact:
     data_locale: str | None
     unicode_normalization: str | None
     categorical_vocabulary_version: int
+    purpose: str
+    approval_status: str
     is_legacy_vocabulary: bool
     compatibility_normalization_required: bool
     manifest: dict[str, Any]
@@ -132,6 +134,8 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
                 data_locale=manifest.get("data_locale") or DATA_LOCALE,
                 unicode_normalization=manifest.get("unicode_normalization") or UNICODE_NORMALIZATION,
                 categorical_vocabulary_version=vocabulary_version,
+                purpose=_artifact_purpose(manifest, artifact_path),
+                approval_status=_artifact_approval_status(manifest, artifact_path),
                 is_legacy_vocabulary=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 compatibility_normalization_required=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 manifest=manifest,
@@ -186,3 +190,33 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _artifact_purpose(manifest: dict[str, Any], artifact_path: Path) -> str:
+    purpose = manifest.get("purpose") or manifest.get("artifact_purpose") or manifest.get("assessment_mode")
+    if isinstance(purpose, str) and purpose:
+        return purpose.lower().replace("-", "_")
+    name = artifact_path.name.lower()
+    if "smoke" in name:
+        return "smoke"
+    if "candidate" in name or "candidato" in name:
+        return "candidate"
+    if "experimental" in name or "experiment" in name:
+        return "experimental"
+    return "legacy" if _optional_int(manifest.get("categorical_vocabulary_version")) is None else "experimental"
+
+
+def _artifact_approval_status(manifest: dict[str, Any], artifact_path: Path) -> str:
+    status = manifest.get("approval_status") or manifest.get("model_status") or manifest.get("status")
+    if isinstance(status, str) and status:
+        return status.lower().replace("-", "_")
+    purpose = _artifact_purpose(manifest, artifact_path)
+    if purpose == "approved":
+        return "approved"
+    if purpose == "smoke":
+        return "smoke"
+    if purpose == "candidate":
+        return "candidate"
+    if purpose == "legacy":
+        return "legacy"
+    return "experimental"
