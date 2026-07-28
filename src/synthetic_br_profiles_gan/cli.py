@@ -13,6 +13,7 @@ import pandas as pd
 
 from synthetic_br_profiles_gan.benchmark import run_benchmark
 from synthetic_br_profiles_gan.calibration import save_calibration_splits
+from synthetic_br_profiles_gan.column_catalog import available_presets
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge, load_yaml_config
 from synthetic_br_profiles_gan.evaluation.metrics import evaluate_against_reference
 from synthetic_br_profiles_gan.manifest import build_run_id, write_json
@@ -73,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--output", default=None)
     generate.add_argument("--format", choices=["csv", "json", "parquet"], default="parquet")
     generate.add_argument("--seed", type=int, default=None)
+    generate.add_argument("--columns", nargs="+", default=None, help="Colunas finais a exportar, em ordem.")
+    generate.add_argument(
+        "--preset",
+        default=None,
+        help=f"Preset de colunas ({', '.join(available_presets())}).",
+    )
     generate.add_argument("--overwrite", action="store_true")
 
     evaluate = subparsers.add_parser("evaluate", help="Evaluate synthetic data against one reference table.")
@@ -164,6 +171,8 @@ def command_generate(args: argparse.Namespace) -> int:
             seed=seed,
             config=config,
             overwrite=bool(args.overwrite),
+            selected_columns=_parse_column_arguments(args.columns),
+            column_preset=args.preset,
         )
     )
     LOGGER.info(
@@ -176,6 +185,17 @@ def command_generate(args: argparse.Namespace) -> int:
         },
     )
     return 0
+
+
+def _parse_column_arguments(values: list[str] | None) -> list[str] | None:
+    """Converte argumentos de colunas separados por espaço ou vírgula."""
+    if values is None:
+        return None
+    columns: list[str] = []
+    for value in values:
+        parts = str(value).split(",")
+        columns.extend(part.strip() for part in parts if part.strip())
+    return columns
 
 
 def command_evaluate(args: argparse.Namespace) -> int:

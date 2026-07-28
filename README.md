@@ -20,6 +20,7 @@ O pacote separa as responsabilidades principais:
 
 - `calibration.py`: cria a base de calibração sintética com dependências semânticas e divisão entre conjunto de treinamento e conjunto de holdout, isto é, o subconjunto reservado exclusivamente para avaliação.
 - `metadata.py`: define schema, tipos, domínios, categorias e dependências estruturais.
+- `column_catalog.py`: descreve as 18 colunas finais, seus grupos, dependências internas e presets de exportação.
 - `generators/`: contém o contexto de perfil e os geradores de nomes, datas, telefone e documentos fictícios.
 - `models/`: contém a interface comum `TabularSynthesizer`, o baseline programático, `SimpleTabularGAN` e `CTGANSynthesizer`.
 - `models/registry.py`: carrega modelos salvos a partir de `training_manifest.json` e valida arquivos obrigatórios.
@@ -131,6 +132,44 @@ python -m synthetic_br_profiles_gan generate \
 ```
 
 O comando `generate` produz as 18 colunas finais, aplica pós-processamento contextual, valida estruturalmente o dataset e só exporta quando a validação bloqueante passa. Os formatos aceitos são `csv`, `json` e `parquet`. O CSV usa UTF-8, sem índice, com separador `;`, escolhido por compatibilidade prática com ferramentas brasileiras.
+
+Também é possível exportar apenas um subconjunto das colunas finais. A seleção ocorre somente depois da geração interna das 18 colunas e depois da validação estrutural completa; os sintetizadores continuam usando o mesmo contrato interno de 11 colunas-base.
+
+Seleção explícita, preservando a ordem informada:
+
+```bash
+python -m synthetic_br_profiles_gan generate \
+  --model programmatic \
+  --rows 1000 \
+  --columns Nome Idade Estado CPF \
+  --output artifacts/generations/perfis.csv \
+  --format csv
+```
+
+A CLI também aceita uma lista separada por vírgulas em `--columns`, por exemplo `--columns Nome,Idade,Estado,CPF`. Colunas desconhecidas, repetidas ou com capitalização incorreta são rejeitadas. Não há normalização silenciosa de nomes como `Uf` para `Estado`.
+
+Presets disponíveis:
+
+- `completo`: todas as 18 colunas;
+- `demografico`: perfil demográfico e socioeconômico sem identificadores documentais;
+- `contato`: nome, localização e telefone;
+- `documentos`: nome, data de nascimento e identificadores sintéticos;
+- `minimo`: `Nome`, `Idade`, `Estado` e `CPF`.
+
+Exemplo com preset:
+
+```bash
+python -m synthetic_br_profiles_gan generate \
+  --model programmatic \
+  --rows 1000 \
+  --preset demografico \
+  --output artifacts/generations/demografico.parquet \
+  --format parquet
+```
+
+`--columns` e `--preset` não podem ser usados simultaneamente. Dependências internas continuam sendo usadas para gerar e validar os dados, mas não são adicionadas automaticamente ao arquivo exportado. Por exemplo, `Telefone` depende internamente de `Estado` e `DDD`; se o usuário solicitar apenas `Nome Telefone CPF`, o arquivo conterá somente essas três colunas.
+
+Modelos salvos podem conter `pickle` ou formatos equivalentes. Por segurança, carregue apenas artefatos produzidos ou previamente aprovados pela própria aplicação. Esta fase não implementa upload arbitrário de modelos.
 
 Validar um dataset final:
 
@@ -330,7 +369,7 @@ O manifesto registra `run_id`, timestamp UTC, modelo, seed, quantidades, status,
 
 Modelos treinados pelo comando `train` usam `training_manifest.json`, com `schema_version`, `artifact_type`, modelo, seed, indicação de `training_required`, tamanhos de treino, holdout e calibração, colunas de modelo, colunas finais, configuração resolvida, ambiente, tempos e tamanho do artefato.
 
-Datasets gerados pelo comando `generate` recebem um manifesto próximo ao arquivo exportado, por exemplo `programmatic-10000.manifest.json`. Esse manifesto registra modelo, caminho do artefato de modelo quando houver, linhas, colunas, formato, seed, arquivo de saída, validação estrutural, tempos, ambiente e aviso de governança.
+Datasets gerados pelo comando `generate` recebem um manifesto próximo ao arquivo exportado, por exemplo `programmatic-10000.manifest.json`. Esse manifesto registra modelo, caminho do artefato de modelo quando houver, linhas, colunas exportadas, colunas geradas internamente, modo de seleção (`all`, `explicit` ou `preset`), preset usado quando aplicável, dependências internas, formato, seed, arquivo de saída, validação estrutural do schema completo, tempos, ambiente e aviso de governança.
 
 ## Reprodutibilidade
 
@@ -339,6 +378,8 @@ A seed é centralizada. O pipeline controla `random`, NumPy e, quando o modelo e
 Operações neurais podem variar entre CPU, GPU, drivers e versões de backend. Os testes padrão evitam exigir igualdade bit a bit de TensorFlow ou CTGAN.
 
 No fluxo separado, `generate --seed` controla a amostragem quando o sintetizador oferece suporte, além de Faker, identificadores, data de nascimento e pós-processamento. Duas gerações programáticas com o mesmo artefato, seed, quantidade e versão do projeto devem produzir o mesmo arquivo. Backends neurais podem ter limitações adicionais de determinismo.
+
+A seleção de colunas altera apenas a projeção exportada. Com a mesma seed, quantidade e modelo, a geração interna completa permanece a mesma; arquivos com subconjuntos diferentes terão conteúdos e manifestos diferentes porque exportam colunas distintas.
 
 ## Notebook
 
@@ -350,7 +391,7 @@ O notebook em `notebooks/` importa o pacote e demonstra execução, amostra, val
 python -m unittest discover -s tests
 ```
 
-Os testes cobrem schema, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, serviços de treinamento e geração, carregamento de modelos, reprodutibilidade e pipeline pequeno.
+Os testes cobrem schema, catálogo de colunas, presets, seleção parcial na exportação, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, serviços de treinamento e geração, carregamento de modelos, reprodutibilidade e pipeline pequeno.
 
 ## Limitações
 

@@ -11,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 
+from synthetic_br_profiles_gan.column_catalog import ColumnSelection, resolve_column_selection
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge
 from synthetic_br_profiles_gan.exceptions import ConfigurationError, StructuralValidationError
 from synthetic_br_profiles_gan.manifest import environment_info, get_git_commit, write_json
@@ -41,6 +42,8 @@ class GenerationRequest:
     seed: int = 41
     config: dict[str, Any] | None = None
     overwrite: bool = False
+    selected_columns: tuple[str, ...] | list[str] | None = None
+    column_preset: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,8 @@ class GenerationResult:
     manifest_path: Path
     duration_seconds: float
     validation_report: dict[str, Any]
+    internal_columns: tuple[str, ...]
+    exported_columns: tuple[str, ...]
 
 
 def run_generation(request: GenerationRequest) -> GenerationResult:
@@ -64,6 +69,11 @@ def run_generation(request: GenerationRequest) -> GenerationResult:
     _validate_generation_request(request, model_name, output_format)
     config = deep_merge(DEFAULT_PIPELINE_CONFIG, request.config or {})
     metadata = default_metadata()
+    column_selection = resolve_column_selection(
+        request.selected_columns,
+        preset=request.column_preset,
+        available_columns=metadata.final_columns,
+    )
     reference_date = str(config.get("reference_date", DEFAULT_PIPELINE_CONFIG["reference_date"]))
     output_path = Path(request.output_path)
     manifest_path = _generation_manifest_path(output_path)
@@ -111,6 +121,12 @@ def run_generation(request: GenerationRequest) -> GenerationResult:
     validation_started = time.perf_counter()
     validation_report = validate_profile_dataframe(dataset, metadata=metadata, final=True, reference_date=reference_date).report
     validation_seconds = float(time.perf_counter() - validation_started)
+    validation_report = {
+        **validation_report,
+        "validation_scope": "full_final_schema",
+        "validated_columns": list(metadata.final_columns),
+        "projection_after_validation": True,
+    }
     if int(len(dataset)) != int(request.num_rows):
         raise StructuralValidationError(f"Generated dataset has {len(dataset)} rows; expected {request.num_rows}.")
     if list(dataset.columns) != metadata.final_columns:
@@ -118,15 +134,18 @@ def run_generation(request: GenerationRequest) -> GenerationResult:
     if not validation_report.get("is_valid", False):
         raise StructuralValidationError(f"Generated dataset failed structural validation: {validation_report.get('reason_counts', {})}")
 
+    exported_dataset = dataset.loc[:, list(column_selection.exported_columns)].copy()
     export_started = time.perf_counter()
-    _export_dataset(dataset, output_path, output_format)
+    _export_dataset(exported_dataset, output_path, output_format)
     export_seconds = float(time.perf_counter() - export_started)
     ended = datetime.now(timezone.utc)
     manifest = build_generation_manifest(
         model=model_name or "programmatic",
         model_artifact=model_artifact,
         rows=int(request.num_rows),
-        columns=list(dataset.columns),
+        columns=list(exported_dataset.columns),
+        internal_columns=list(dataset.columns),
+        column_selection=column_selection,
         output_format=output_format,
         seed=int(request.seed),
         output_path=output_path,
@@ -153,6 +172,8 @@ def run_generation(request: GenerationRequest) -> GenerationResult:
         manifest_path=manifest_path,
         duration_seconds=float((ended - started).total_seconds()),
         validation_report=validation_report,
+        internal_columns=tuple(dataset.columns),
+        exported_columns=tuple(exported_dataset.columns),
     )
 
 
@@ -161,6 +182,8 @@ def build_generation_manifest(
     model_artifact: str | None,
     rows: int,
     columns: list[str],
+    internal_columns: list[str],
+    column_selection: ColumnSelection,
     output_format: str,
     seed: int,
     output_path: Path,
@@ -183,6 +206,17 @@ def build_generation_manifest(
         "source_training_manifest": None if training_manifest is None else training_manifest.get("created_at_utc"),
         "rows": int(rows),
         "columns": columns,
+        "requested_columns": (
+            None if column_selection.requested_columns is None else list(column_selection.requested_columns)
+        ),
+        "exported_columns": list(column_selection.exported_columns),
+        "internally_generated_columns": internal_columns,
+        "column_selection_mode": column_selection.mode,
+        "column_preset": column_selection.preset,
+        "internal_dependencies": {
+            column: list(dependencies)
+            for column, dependencies in column_selection.internal_dependencies.items()
+        },
         "format": output_format,
         "seed": int(seed),
         "output_file": str(output_path),

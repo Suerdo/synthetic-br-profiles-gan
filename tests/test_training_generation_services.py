@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,8 +17,8 @@ import pandas as pd
 
 from synthetic_br_profiles_gan.cli import main
 from synthetic_br_profiles_gan.config import ConfigurationError, load_yaml_config
-from synthetic_br_profiles_gan.exceptions import ModelSerializationError
-from synthetic_br_profiles_gan.metadata import default_metadata
+from synthetic_br_profiles_gan.exceptions import ModelSerializationError, StructuralValidationError
+from synthetic_br_profiles_gan.metadata import FINAL_COLUMNS, default_metadata
 from synthetic_br_profiles_gan.models.programmatic import ProgrammaticSynthesizer
 from synthetic_br_profiles_gan.models.registry import load_saved_synthesizer
 from synthetic_br_profiles_gan.services.generation_service import GenerationRequest, run_generation
@@ -143,6 +144,9 @@ class TrainingGenerationServicesTest(unittest.TestCase):
                 self.assertTrue(result.manifest_path.exists())
                 manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
                 self.assertEqual(manifest["rows"], 5)
+                self.assertEqual(manifest["column_selection_mode"], "all")
+                self.assertIsNone(manifest["column_preset"])
+                self.assertIsNone(manifest["requested_columns"])
                 self.assertIn("não foram consultados", manifest["governance_notice"])
                 if output_format == "csv":
                     frame = pd.read_csv(output, sep=";")
@@ -152,6 +156,99 @@ class TrainingGenerationServicesTest(unittest.TestCase):
                     frame = pd.read_parquet(output)
                 self.assertEqual(list(frame.columns), default_metadata().final_columns)
                 self.assertEqual(len(frame), 5)
+
+    def test_direct_generation_exports_one_selected_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "cpf.csv"
+            result = run_generation(
+                GenerationRequest(
+                    model="programmatic",
+                    model_path=None,
+                    num_rows=4,
+                    output_path=output,
+                    output_format="csv",
+                    seed=41,
+                    selected_columns=["CPF"],
+                )
+            )
+            frame = pd.read_csv(output, sep=";")
+            self.assertEqual(result.exported_columns, ("CPF",))
+            self.assertEqual(list(frame.columns), ["CPF"])
+            self.assertEqual(len(frame), 4)
+
+    def test_direct_generation_exports_explicit_selected_columns_in_requested_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for output_format in ["csv", "json", "parquet"]:
+                output = root / f"selected-{output_format}.{output_format}"
+                result = run_generation(
+                    GenerationRequest(
+                        model="programmatic",
+                        model_path=None,
+                        num_rows=5,
+                        output_path=output,
+                        output_format=output_format,
+                        seed=41,
+                        selected_columns=["CPF", "Nome", "Estado", "Idade"],
+                    )
+                )
+                self.assertEqual(result.internal_columns, tuple(FINAL_COLUMNS))
+                self.assertEqual(result.exported_columns, ("CPF", "Nome", "Estado", "Idade"))
+                manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(manifest["column_selection_mode"], "explicit")
+                self.assertEqual(manifest["requested_columns"], ["CPF", "Nome", "Estado", "Idade"])
+                self.assertEqual(manifest["exported_columns"], ["CPF", "Nome", "Estado", "Idade"])
+                self.assertEqual(manifest["internally_generated_columns"], FINAL_COLUMNS)
+                self.assertEqual(manifest["validation"]["validated_columns"], FINAL_COLUMNS)
+                self.assertTrue(manifest["validation"]["projection_after_validation"])
+                if output_format == "csv":
+                    frame = pd.read_csv(output, sep=";")
+                elif output_format == "json":
+                    frame = pd.DataFrame(json.loads(output.read_text(encoding="utf-8")))
+                else:
+                    frame = pd.read_parquet(output)
+                self.assertEqual(list(frame.columns), ["CPF", "Nome", "Estado", "Idade"])
+                self.assertEqual(len(frame), 5)
+
+    def test_generation_presets_and_internal_dependencies_do_not_expand_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_generation(
+                GenerationRequest(
+                    model="programmatic",
+                    model_path=None,
+                    num_rows=5,
+                    output_path=root / "contact.json",
+                    output_format="json",
+                    seed=41,
+                    column_preset="contato",
+                )
+            )
+            frame = pd.DataFrame(json.loads(result.output_path.read_text(encoding="utf-8")))
+            self.assertEqual(list(frame.columns), ["Nome", "Regiao", "Estado", "Municipio", "DDD", "Telefone"])
+            manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["column_selection_mode"], "preset")
+            self.assertEqual(manifest["column_preset"], "contato")
+            self.assertEqual(manifest["internal_dependencies"]["Telefone"], ["Estado", "DDD"])
+
+            explicit = run_generation(
+                GenerationRequest(
+                    model="programmatic",
+                    model_path=None,
+                    num_rows=5,
+                    output_path=root / "dependency.csv",
+                    output_format="csv",
+                    seed=41,
+                    selected_columns=["Nome", "Telefone", "CPF"],
+                )
+            )
+            dependency_frame = pd.read_csv(explicit.output_path, sep=";")
+            self.assertEqual(list(dependency_frame.columns), ["Nome", "Telefone", "CPF"])
+            dependency_manifest = json.loads(explicit.manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(dependency_manifest["internal_dependencies"]["Nome"], ["Genero"])
+            self.assertEqual(dependency_manifest["internal_dependencies"]["Telefone"], ["Estado", "DDD"])
+            self.assertNotIn("Estado", dependency_frame.columns)
+            self.assertNotIn("DDD", dependency_frame.columns)
 
     def test_generation_from_saved_programmatic_model_is_reproducible(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -170,6 +267,25 @@ class TrainingGenerationServicesTest(unittest.TestCase):
             run_generation(GenerationRequest(output_path=second, **request))
             self.assertEqual(first.read_text(encoding="utf-8"), second.read_text(encoding="utf-8"))
 
+    def test_generation_from_saved_programmatic_model_supports_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trained = run_training(TrainingRequest("programmatic", root / "model", {}, seed=41, train_rows=12))
+            output = root / "selected.parquet"
+            result = run_generation(
+                GenerationRequest(
+                    model=None,
+                    model_path=trained.output_path,
+                    num_rows=6,
+                    output_path=output,
+                    output_format="parquet",
+                    seed=123,
+                    selected_columns=["Nome", "CPF"],
+                )
+            )
+            self.assertEqual(result.exported_columns, ("Nome", "CPF"))
+            self.assertEqual(list(pd.read_parquet(output).columns), ["Nome", "CPF"])
+
     def test_generation_rejects_bad_rows_format_and_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -183,6 +299,95 @@ class TrainingGenerationServicesTest(unittest.TestCase):
                 run_generation(GenerationRequest("programmatic", None, 1, output, "csv"))
             with self.assertRaises(ConfigurationError):
                 run_generation(GenerationRequest("ctgan", None, 1, root / "ctgan.csv", "csv"))
+            with self.assertRaises(ConfigurationError):
+                run_generation(GenerationRequest("programmatic", None, 1, root / "empty.csv", "csv", selected_columns=[]))
+            with self.assertRaises(ConfigurationError):
+                run_generation(GenerationRequest("programmatic", None, 1, root / "unknown.csv", "csv", selected_columns=["Uf"]))
+            with self.assertRaises(ConfigurationError):
+                run_generation(
+                    GenerationRequest("programmatic", None, 1, root / "duplicate.csv", "csv", selected_columns=["Nome", "Nome"])
+                )
+            with self.assertRaises(ConfigurationError):
+                run_generation(
+                    GenerationRequest(
+                        "programmatic",
+                        None,
+                        1,
+                        root / "conflict.csv",
+                        "csv",
+                        selected_columns=["Nome"],
+                        column_preset="minimo",
+                    )
+                )
+            with self.assertRaises(ConfigurationError):
+                run_generation(GenerationRequest("programmatic", None, 1, root / "preset.csv", "csv", column_preset="desconhecido"))
+
+    def test_validation_runs_on_full_schema_before_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "selected.csv"
+            exported_columns: list[str] = []
+
+            def fake_export(frame: pd.DataFrame, output_path: Path, output_format: str) -> None:
+                exported_columns.extend(list(frame.columns))
+                output_path.write_text("ok", encoding="utf-8")
+
+            with patch("synthetic_br_profiles_gan.services.generation_service._export_dataset", side_effect=fake_export):
+                with patch("synthetic_br_profiles_gan.services.generation_service.validate_profile_dataframe") as validation:
+                    validation.return_value = SimpleNamespace(
+                        report={
+                            "is_valid": True,
+                            "invalid_rows": 0,
+                            "valid_rows": 3,
+                            "n_rows": 3,
+                            "reason_counts": {},
+                            "details": {"missing_columns": []},
+                        }
+                    )
+                    result = run_generation(
+                        GenerationRequest(
+                            "programmatic",
+                            None,
+                            3,
+                            output,
+                            "csv",
+                            seed=41,
+                            selected_columns=["Nome", "CPF"],
+                        )
+                    )
+            validated_frame = validation.call_args.args[0]
+            self.assertEqual(list(validated_frame.columns), FINAL_COLUMNS)
+            self.assertEqual(exported_columns, ["Nome", "CPF"])
+            self.assertEqual(result.validation_report["validation_scope"], "full_final_schema")
+
+    def test_structural_failure_blocks_export_before_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("synthetic_br_profiles_gan.services.generation_service._export_dataset") as export_dataset:
+                with patch("synthetic_br_profiles_gan.services.generation_service.validate_profile_dataframe") as validation:
+                    validation.return_value = SimpleNamespace(
+                        report={
+                            "is_valid": False,
+                            "invalid_rows": 1,
+                            "valid_rows": 2,
+                            "n_rows": 3,
+                            "reason_counts": {"cpf_invalido": 1},
+                            "details": {"missing_columns": []},
+                        }
+                    )
+                    with self.assertRaises(StructuralValidationError):
+                        run_generation(
+                            GenerationRequest(
+                                "programmatic",
+                                None,
+                                3,
+                                root / "selected.csv",
+                                "csv",
+                                seed=41,
+                                selected_columns=["Nome"],
+                            )
+                        )
+            export_dataset.assert_not_called()
 
     def test_cli_train_and_generate_programmatic_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -228,6 +433,61 @@ class TrainingGenerationServicesTest(unittest.TestCase):
                 0,
             )
             self.assertEqual(len(pd.read_csv(dataset, sep=";")), 5)
+
+    def test_cli_generate_accepts_columns_and_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selected = root / "selected.csv"
+            self.assertEqual(
+                main(
+                    [
+                        "--log-level",
+                        "ERROR",
+                        "generate",
+                        "--model",
+                        "programmatic",
+                        "--rows",
+                        "5",
+                        "--columns",
+                        "Nome,Idade",
+                        "Estado",
+                        "CPF",
+                        "--output",
+                        str(selected),
+                        "--format",
+                        "csv",
+                        "--seed",
+                        "41",
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(list(pd.read_csv(selected, sep=";").columns), ["Nome", "Idade", "Estado", "CPF"])
+
+            preset = root / "preset.csv"
+            self.assertEqual(
+                main(
+                    [
+                        "--log-level",
+                        "ERROR",
+                        "generate",
+                        "--model",
+                        "programmatic",
+                        "--rows",
+                        "5",
+                        "--preset",
+                        "minimo",
+                        "--output",
+                        str(preset),
+                        "--format",
+                        "csv",
+                        "--seed",
+                        "41",
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(list(pd.read_csv(preset, sep=";").columns), ["Nome", "Idade", "Estado", "CPF"])
 
 
 if __name__ == "__main__":

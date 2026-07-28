@@ -1,4 +1,8 @@
-"""Carregamento seguro de sintetizadores salvos."""
+"""Carregamento seguro de sintetizadores salvos.
+
+Artefatos com `pickle` ou formatos equivalentes devem vir de diretórios
+produzidos ou previamente aprovados pela própria aplicação.
+"""
 
 from __future__ import annotations
 

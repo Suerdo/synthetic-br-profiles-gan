@@ -80,3 +80,44 @@ Formatos suportados:
 - `parquet`: formato principal para preservar tipos sempre que possível.
 
 O manifesto da geração registra modelo, artefato de origem quando houver, quantidade de linhas, colunas finais, formato, seed, caminho de saída, tamanho do arquivo, tempos, validação estrutural e aviso de governança. A exportação é bloqueada quando a validação estrutural final falha.
+
+## Seleção de colunas na exportação
+
+O comando `generate` sempre gera internamente as 18 colunas finais e executa a validação estrutural sobre esse schema completo. A seleção de colunas é aplicada somente depois dessa validação.
+
+Fluxo:
+
+```text
+geração das 11 colunas-base
+  → pós-processamento das 18 colunas finais
+  → validação estrutural completa
+  → projeção das colunas solicitadas
+  → exportação
+```
+
+Quando `--columns` é usado, a ordem exportada segue exatamente a ordem solicitada. Colunas repetidas, inexistentes, vazias ou com capitalização incorreta são rejeitadas. Quando `--preset` é usado, a ordem segue o preset definido no catálogo.
+
+Presets disponíveis:
+
+- `completo`: todas as 18 colunas;
+- `demografico`: dados demográficos, localização e perfil socioeconômico;
+- `contato`: nome, localização e telefone;
+- `documentos`: nome, data de nascimento e identificadores sintéticos;
+- `minimo`: `Nome`, `Idade`, `Estado` e `CPF`.
+
+Dependências internas registradas no catálogo não são adicionadas automaticamente ao arquivo exportado. Por exemplo, `Telefone` depende de `Estado` e `DDD`, mas uma exportação com `--columns Nome Telefone CPF` contém somente `Nome`, `Telefone` e `CPF`.
+
+O manifesto de geração preserva os campos existentes e acrescenta:
+
+- `requested_columns`: colunas solicitadas explicitamente ou pelo preset;
+- `exported_columns`: colunas presentes no arquivo exportado;
+- `internally_generated_columns`: colunas geradas e validadas internamente;
+- `column_selection_mode`: `all`, `explicit` ou `preset`;
+- `column_preset`: preset utilizado, quando houver;
+- `internal_dependencies`: dependências registradas no catálogo para as colunas exportadas;
+- `validation.validated_columns`: colunas validadas no schema completo;
+- `validation.projection_after_validation`: indica que a projeção ocorreu depois da validação.
+
+## Segurança dos modelos serializados
+
+`SimpleTabularGAN` e `CTGANSynthesizer` usam artefatos serializados, como `pickle` ou formatos equivalentes. O carregamento deve ficar restrito a diretórios de modelos produzidos ou previamente aprovados pela aplicação. Esta fase não implementa upload arbitrário de modelos nem seletor para arquivos `.pkl` enviados por usuários.

@@ -37,11 +37,26 @@ O projeto possui dois fluxos reutilizáveis além do pipeline experimental compl
 
 Essa separação permite treinar `simple_gan` ou `ctgan` uma vez e reutilizar o modelo para várias gerações com diferentes seeds e quantidades de linhas. O baseline programático não possui etapa neural; o artefato salvo registra `training_required: false`.
 
-## 5. Pós-processamento
+## 5. Seleção de colunas para exportação
+
+A seleção de colunas é uma projeção de saída. Ela não altera o treinamento, o carregamento dos modelos nem o contrato interno dos sintetizadores.
+
+Os três modelos continuam gerando as 11 colunas-base. Em seguida, o pós-processamento produz as 18 colunas finais e a validação estrutural é executada sobre o schema completo. Somente depois disso o serviço de geração projeta as colunas solicitadas pelo usuário.
+
+Essa regra preserva dependências internas como:
+
+- `Nome` depende de `Genero`;
+- `Data_Nascimento` depende de `Idade`;
+- `Telefone` depende de `Estado` e `DDD`;
+- `Renda` depende probabilisticamente de idade, escolaridade, ocupação e região.
+
+Essas dependências podem aparecer no manifesto da geração, mas não são adicionadas automaticamente ao arquivo exportado. O catálogo em `column_catalog.py` concentra descrições, grupos, tipos, dependências e presets para reutilização futura em interface.
+
+## 6. Pós-processamento
 
 As saídas do modelo viram `SyntheticProfileContext`. A partir desse contexto, são derivados nome, data de nascimento, telefone e identificadores fictícios. A data de nascimento é sorteada dentro do intervalo que produz exatamente a idade informada na data de referência.
 
-## 6. Validação e avaliação
+## 7. Validação e avaliação
 
 A seleção de linhas usa schema, tipos, domínios, regras semânticas, documentos matematicamente válidos e duplicidade. O discriminador da GAN simples não é usado como probabilidade calibrada nem como filtro principal.
 
