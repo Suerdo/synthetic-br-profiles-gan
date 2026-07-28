@@ -62,6 +62,12 @@ artifacts/
 
 `training_manifest.json` identifica o tipo de artefato, modelo, seed, tamanhos de treino, holdout e calibração, colunas esperadas, configuração resolvida, ambiente, tempos e tamanho do modelo. Para `programmatic`, o campo `training_required` é `false`.
 
+O manifesto de treinamento também registra:
+
+- `data_locale`: idioma canônico dos valores textuais, atualmente `pt-BR`;
+- `unicode_normalization`: forma Unicode utilizada, atualmente `NFC`;
+- `categorical_vocabulary_version`: versão do vocabulário categórico, atualmente `2`.
+
 ## Datasets gerados sob demanda
 
 O comando `generate` exporta um arquivo no formato solicitado e cria um manifesto ao lado dele:
@@ -75,11 +81,21 @@ artifacts/
 
 Formatos suportados:
 
-- `csv`: UTF-8, sem índice, com separador `;`.
+- `csv`: `utf-8-sig`, sem índice, com separador `;`, para preservar acentos e facilitar abertura no Excel para Windows.
 - `json`: lista de objetos, UTF-8, `ensure_ascii=False`.
 - `parquet`: formato principal para preservar tipos sempre que possível.
 
 O manifesto da geração registra modelo, artefato de origem quando houver, quantidade de linhas, colunas finais, formato, seed, caminho de saída, tamanho do arquivo, tempos, validação estrutural e aviso de governança. A exportação é bloqueada quando a validação estrutural final falha.
+
+Também são registrados:
+
+- `data_locale`;
+- `unicode_normalization`;
+- `source_model_vocabulary_version`;
+- `output_vocabulary_version`;
+- `legacy_value_normalization_applied`.
+
+Esses campos permitem identificar quando um modelo neural legado gerou valores com vocabulário anterior e a saída foi normalizada para o vocabulário atual.
 
 ## Seleção de colunas na exportação
 

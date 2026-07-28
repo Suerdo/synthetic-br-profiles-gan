@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from synthetic_br_profiles_gan.exceptions import ModelSerializationError
+from synthetic_br_profiles_gan.localization import (
+    CATEGORICAL_VOCABULARY_VERSION,
+    DATA_LOCALE,
+    UNICODE_NORMALIZATION,
+)
 from synthetic_br_profiles_gan.metadata import default_metadata
 from synthetic_br_profiles_gan.models.ctgan import CTGANSynthesizer
 from synthetic_br_profiles_gan.models.programmatic import ProgrammaticSynthesizer
@@ -55,6 +60,11 @@ class SavedModelArtifact:
     schema_version: int
     training_required: bool
     model_size_bytes: int | None
+    data_locale: str | None
+    unicode_normalization: str | None
+    categorical_vocabulary_version: int
+    is_legacy_vocabulary: bool
+    compatibility_normalization_required: bool
     manifest: dict[str, Any]
 
 
@@ -107,6 +117,7 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
             validate_required_model_files(artifact_path, artifact_model)
         except ModelSerializationError:
             continue
+        vocabulary_version = _optional_int(manifest.get("categorical_vocabulary_version")) or 1
         artifacts.append(
             SavedModelArtifact(
                 model=artifact_model,
@@ -118,6 +129,11 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
                 schema_version=int(manifest.get("schema_version", 0)),
                 training_required=bool(manifest.get("training_required", artifact_model != "programmatic")),
                 model_size_bytes=_optional_int(manifest.get("model_size_bytes")),
+                data_locale=manifest.get("data_locale") or DATA_LOCALE,
+                unicode_normalization=manifest.get("unicode_normalization") or UNICODE_NORMALIZATION,
+                categorical_vocabulary_version=vocabulary_version,
+                is_legacy_vocabulary=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
+                compatibility_normalization_required=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 manifest=manifest,
             )
         )

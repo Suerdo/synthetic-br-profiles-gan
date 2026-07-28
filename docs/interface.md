@@ -81,6 +81,8 @@ O modelo `programmatic` está sempre disponível e não exige treinamento prévi
 
 A interface não permite upload de `.pkl`, `.keras`, `.json` ou outros artefatos de modelo. Também não permite que o usuário informe caminhos arbitrários. Modelos serializados devem ser produzidos ou previamente aprovados pela própria aplicação.
 
+Quando um artefato neural foi treinado com a versão anterior do vocabulário categórico, a interface mostra um aviso. A saída terá acentuação normalizada por aliases legados, mas o modelo não conhecerá automaticamente as ocupações adicionadas na versão atual. Para obter toda a diversidade do vocabulário `2`, o artefato precisa ser treinado novamente com a base de calibração atual.
+
 ## Seleção de colunas
 
 Os três modelos continuam gerando internamente as 11 colunas-base. O pós-processamento produz as 18 colunas finais e a validação estrutural é executada sobre o schema completo.
@@ -115,7 +117,7 @@ Dependências internas, como `Telefone` depender de `Estado` e `DDD`, continuam 
 
 Formatos disponíveis:
 
-- `csv`: compatível com planilhas e ferramentas de análise;
+- `csv`: compatível com planilhas e ferramentas de análise, gravado em `utf-8-sig` e separador `;`;
 - `json`: adequado para integrações e desenvolvimento;
 - `parquet`: indicado para análise de dados com preservação de tipos.
 
@@ -145,6 +147,12 @@ Os dados gerados são sintéticos e não foram consultados ou validados em bases
 A ferramenta auxilia testes, ensino e pesquisa, mas não oferece garantia absoluta de anonimização ou ausência de coincidências com informações reais.
 
 Os dados não devem ser usados para fraude, autenticação, identificação real, criação de contas, engenharia social ou acesso a serviços.
+
+## Vocabulário e labels
+
+Os nomes técnicos das colunas continuam sem acento por compatibilidade com modelos, CLI, manifestos, presets e código externo. A interface apresenta labels em português brasileiro, como `Gênero`, `Região`, `Município`, `Ocupação`, `Título de eleitor`, `Estado civil` e `Data de nascimento`.
+
+Os valores categóricos exportados usam português brasileiro canônico, normalização Unicode NFC e vocabulário categórico `2`. Isso inclui escolaridade, estado civil, ocupações e municípios com acentuação. A interface não remove acentos nem converte os dados para ASCII.
 
 ## Limitações
 

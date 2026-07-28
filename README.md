@@ -19,6 +19,7 @@ O modelo `simple_gan` não é uma CTGAN. Ele é mantido como baseline neural leg
 O pacote separa as responsabilidades principais:
 
 - `calibration.py`: cria a base de calibração sintética com dependências semânticas e divisão entre conjunto de treinamento e conjunto de holdout, isto é, o subconjunto reservado exclusivamente para avaliação.
+- `localization.py` e `domain/occupations.py`: definem português brasileiro como idioma canônico dos valores textuais, normalização Unicode NFC, aliases legados e o catálogo estruturado de ocupações.
 - `metadata.py`: define schema, tipos, domínios, categorias e dependências estruturais.
 - `column_catalog.py`: descreve as 18 colunas finais, seus grupos, dependências internas e presets de exportação.
 - `generators/`: contém o contexto de perfil e os geradores de nomes, datas, telefone e documentos fictícios.
@@ -63,6 +64,12 @@ As relações são probabilísticas e reproduzíveis por seed:
 - ocupação depende da idade e da escolaridade;
 - renda usa uma distribuição assimétrica e depende de idade, escolaridade, ocupação e região;
 - estado civil e dependentes dependem da idade e do contexto familiar.
+
+Os valores categóricos canônicos usam português brasileiro com acentuação e normalização Unicode NFC. A versão atual do vocabulário categórico é `2`. Ela corrige categorias como `Ensino Médio`, `Pós-graduação`, `União Estável`, `Viúvo`, `Serviços Gerais`, `Técnico` e `Autônomo`, além de municípios como `São Paulo`, `João Pessoa`, `Maceió`, `Macapá` e `Brasília`.
+
+O catálogo ampliado de ocupações é estruturado por nome, grupo, escolaridade permitida, faixa etária, multiplicador de renda, peso de amostragem e descrição. Essas regras são parâmetros sintéticos configuráveis, não estatísticas oficiais do mercado de trabalho brasileiro. A renda não recebe ajuste por gênero.
+
+Mais detalhes estão em `docs/vocabulary.md`.
 
 Criar a base de calibração:
 
@@ -131,7 +138,7 @@ python -m synthetic_br_profiles_gan generate \
   --seed 41
 ```
 
-O comando `generate` produz as 18 colunas finais, aplica pós-processamento contextual, valida estruturalmente o dataset e só exporta quando a validação bloqueante passa. Os formatos aceitos são `csv`, `json` e `parquet`. O CSV usa UTF-8, sem índice, com separador `;`, escolhido por compatibilidade prática com ferramentas brasileiras.
+O comando `generate` produz as 18 colunas finais, aplica pós-processamento contextual, normaliza textos em Unicode NFC, valida estruturalmente o dataset e só exporta quando a validação bloqueante passa. Os formatos aceitos são `csv`, `json` e `parquet`. O CSV usa `utf-8-sig`, sem índice, com separador `;`, escolhido por compatibilidade prática com ferramentas brasileiras e com abertura no Excel para Windows.
 
 Também é possível exportar apenas um subconjunto das colunas finais. A seleção ocorre somente depois da geração interna das 18 colunas e depois da validação estrutural completa; os sintetizadores continuam usando o mesmo contrato interno de 11 colunas-base.
 
@@ -170,6 +177,8 @@ python -m synthetic_br_profiles_gan generate \
 `--columns` e `--preset` não podem ser usados simultaneamente. Dependências internas continuam sendo usadas para gerar e validar os dados, mas não são adicionadas automaticamente ao arquivo exportado. Por exemplo, `Telefone` depende internamente de `Estado` e `DDD`; se o usuário solicitar apenas `Nome Telefone CPF`, o arquivo conterá somente essas três colunas.
 
 Modelos salvos podem conter `pickle` ou formatos equivalentes. Por segurança, carregue apenas artefatos produzidos ou previamente aprovados pela própria aplicação. Esta fase não implementa upload arbitrário de modelos.
+
+Modelos neurais treinados antes do vocabulário `2` continuam carregando. A saída desses artefatos passa por normalização de acentuação e aliases legados, mas o modelo não passa a conhecer automaticamente as novas ocupações. Para que `ctgan` e `simple_gan` aprendam o catálogo ampliado, é necessário retreiná-los com a base de calibração atual.
 
 Validar um dataset final:
 
@@ -367,9 +376,9 @@ Dentro de `approved/` ou `quarantine/` são salvos:
 
 O manifesto registra `run_id`, timestamp UTC, modelo, seed, quantidades, status, versões de bibliotecas, plataforma, CPU/GPU quando o backend está carregado, duração, hash da configuração, hashes dos artefatos e commit Git quando disponível.
 
-Modelos treinados pelo comando `train` usam `training_manifest.json`, com `schema_version`, `artifact_type`, modelo, seed, indicação de `training_required`, tamanhos de treino, holdout e calibração, colunas de modelo, colunas finais, configuração resolvida, ambiente, tempos e tamanho do artefato.
+Modelos treinados pelo comando `train` usam `training_manifest.json`, com `schema_version`, `artifact_type`, modelo, seed, indicação de `training_required`, tamanhos de treino, holdout e calibração, colunas de modelo, colunas finais, configuração resolvida, ambiente, tempos, tamanho do artefato, `data_locale`, `unicode_normalization` e `categorical_vocabulary_version`.
 
-Datasets gerados pelo comando `generate` recebem um manifesto próximo ao arquivo exportado, por exemplo `programmatic-10000.manifest.json`. Esse manifesto registra modelo, caminho do artefato de modelo quando houver, linhas, colunas exportadas, colunas geradas internamente, modo de seleção (`all`, `explicit` ou `preset`), preset usado quando aplicável, dependências internas, formato, seed, arquivo de saída, validação estrutural do schema completo, tempos, ambiente e aviso de governança.
+Datasets gerados pelo comando `generate` recebem um manifesto próximo ao arquivo exportado, por exemplo `programmatic-10000.manifest.json`. Esse manifesto registra modelo, caminho do artefato de modelo quando houver, linhas, colunas exportadas, colunas geradas internamente, modo de seleção (`all`, `explicit` ou `preset`), preset usado quando aplicável, dependências internas, formato, seed, arquivo de saída, validação estrutural do schema completo, tempos, ambiente, aviso de governança, versão do vocabulário do modelo de origem e versão do vocabulário da saída.
 
 ## Reprodutibilidade
 
@@ -405,13 +414,15 @@ A interface permite escolher modelo, quantidade de registros, seed, formato de s
 
 A seleção de colunas é aplicada somente depois da geração interna das 18 colunas finais e da validação estrutural completa. A interface não permite upload de modelos nem caminhos arbitrários para artefatos serializados. Consulte `docs/interface.md` para detalhes de instalação, telas, governança, diretórios temporários e limitações.
 
+Quando um artefato neural legado é selecionado, a interface informa que a saída terá acentuação normalizada, mas que o modelo foi treinado com a versão anterior do vocabulário e não conhece as novas ocupações.
+
 ## Testes
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-Os testes cobrem schema, catálogo de colunas, presets, seleção parcial na exportação, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, serviços de treinamento e geração, carregamento de modelos, reprodutibilidade e pipeline pequeno.
+Os testes cobrem schema, vocabulário em português brasileiro, catálogo ampliado de ocupações, normalização Unicode, aliases legados, catálogo de colunas, presets, seleção parcial na exportação, base de calibração, relações entre estado, região, município e DDD, data de nascimento, documentos, validadores, métricas, privacidade, quality gates, `run_id`, CLI, baseline programático, serviços de treinamento e geração, carregamento de modelos, reprodutibilidade e pipeline pequeno.
 
 ## Limitações
 
@@ -423,6 +434,7 @@ Os testes cobrem schema, catálogo de colunas, presets, seleção parcial na exp
 - A base de calibração programática não representa perfeitamente a população brasileira.
 - Qualidade estatística não significa veracidade individual.
 - A GAN antiga é uma GAN tabular densa simples; CTGAN só existe no modelo `ctgan`.
+- Modelos neurais antigos permanecem compatíveis, mas precisam ser retreinados para aprender ocupações adicionadas ao vocabulário categórico `2`.
 
 ## Uso responsável
 

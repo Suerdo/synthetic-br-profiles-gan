@@ -23,6 +23,7 @@ from synthetic_br_profiles_gan.generators.identifiers import (
     gerar_telefone,
     gerar_titulo_eleitor,
 )
+from synthetic_br_profiles_gan.localization import normalize_text_frame
 from synthetic_br_profiles_gan.metadata import FINAL_COLUMNS, MODEL_COLUMNS
 
 
@@ -121,7 +122,7 @@ def gerar_nome_por_genero(genero_label: str, fake: Faker) -> str:
 
 
 def _normalize_model_frame(df: pd.DataFrame, rng: random.Random) -> pd.DataFrame:
-    normalized = df.copy()
+    normalized = normalize_text_frame(df)
     if "Sexo" in normalized.columns and "Genero" not in normalized.columns:
         normalized["Genero"] = normalized["Sexo"].round().astype(int).clip(0, 1).map({0: "Feminino", 1: "Masculino"})
         normalized = normalized.drop(columns=["Sexo"])
@@ -147,7 +148,7 @@ def _normalize_model_frame(df: pd.DataFrame, rng: random.Random) -> pd.DataFrame
             normalized.at[index, "Municipio"] = rng.choice(STATE_MUNICIPALITIES.get(state, (str(row["Municipio"]),)))
         if int(row["DDD"]) not in STATE_DDDS.get(state, ()):
             normalized.at[index, "DDD"] = int(rng.choice(STATE_DDDS.get(state, (int(row["DDD"]),))))
-    return normalized[MODEL_COLUMNS]
+    return normalize_text_frame(normalized[MODEL_COLUMNS])
 
 
 def _unique_value(generator, used: set[str], max_attempts: int = 1000) -> str:
@@ -203,4 +204,4 @@ def finalizar_perfis_sinteticos(
 
     synthetic = pd.DataFrame(rows)
     synthetic["Renda"] = synthetic["Renda"].astype(float).round(2)
-    return synthetic[FINAL_COLUMNS]
+    return normalize_text_frame(synthetic[FINAL_COLUMNS])

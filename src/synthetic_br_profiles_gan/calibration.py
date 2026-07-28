@@ -16,6 +16,13 @@ from synthetic_br_profiles_gan.domain.brazil import (
     STATE_DDDS,
     STATE_MUNICIPALITIES,
 )
+from synthetic_br_profiles_gan.domain.occupations import (
+    OCCUPATION_CATALOG,
+    income_multiplier_for_occupation,
+    income_variability_for_occupation,
+    occupation_sampling_weights,
+)
+from synthetic_br_profiles_gan.localization import normalize_text_frame
 from synthetic_br_profiles_gan.metadata import (
     EDUCATION_CATEGORIES,
     GENDER_CATEGORIES,
@@ -51,22 +58,15 @@ REGION_INCOME_MULTIPLIER = {
 }
 
 EDUCATION_INCOME_MULTIPLIER = {
-    "Fundamental": 0.74,
-    "Ensino Medio": 0.92,
-    "Superior Incompleto": 1.08,
-    "Superior Completo": 1.55,
-    "Pos-graduacao": 2.05,
+    "Fundamental": 0.82,
+    "Ensino Médio": 0.95,
+    "Superior Incompleto": 1.05,
+    "Superior Completo": 1.30,
+    "Pós-graduação": 1.48,
 }
 
 OCCUPATION_INCOME_MULTIPLIER = {
-    "Estudante": 0.46,
-    "Servicos Gerais": 0.74,
-    "Tecnico": 1.02,
-    "Analista": 1.32,
-    "Coordenador": 1.62,
-    "Gerente": 2.18,
-    "Autonomo": 1.08,
-    "Aposentado": 0.88,
+    profile.name: profile.income_multiplier for profile in OCCUPATION_CATALOG
 }
 
 
@@ -107,21 +107,10 @@ def _sample_education(rng: np.random.Generator, age: int) -> str:
 
 
 def _sample_occupation(rng: np.random.Generator, age: int, education: str) -> str:
-    if age >= 65:
-        return str(_choice(rng, OCCUPATION_CATEGORIES, [0.01, 0.05, 0.07, 0.08, 0.04, 0.03, 0.12, 0.60]))
-    if age <= 23 and education in {"Ensino Medio", "Superior Incompleto"}:
-        return str(_choice(rng, OCCUPATION_CATEGORIES, [0.40, 0.14, 0.16, 0.12, 0.02, 0.00, 0.16, 0.00]))
-    if education == "Fundamental":
-        weights = [0.02, 0.50, 0.16, 0.03, 0.01, 0.00, 0.26, 0.02]
-    elif education == "Ensino Medio":
-        weights = [0.03, 0.28, 0.30, 0.12, 0.04, 0.01, 0.20, 0.02]
-    elif education == "Superior Incompleto":
-        weights = [0.10, 0.08, 0.28, 0.28, 0.07, 0.02, 0.16, 0.01]
-    elif education == "Superior Completo":
-        weights = [0.01, 0.03, 0.20, 0.42, 0.15, 0.06, 0.12, 0.01]
-    else:
-        weights = [0.00, 0.01, 0.08, 0.44, 0.20, 0.16, 0.10, 0.01]
-    return str(_choice(rng, OCCUPATION_CATEGORIES, weights))
+    weights = occupation_sampling_weights(education, int(age))
+    if not weights:
+        return str(_choice(rng, OCCUPATION_CATEGORIES))
+    return str(_choice(rng, tuple(weights), list(weights.values())))
 
 
 def _sample_marital_status(rng: np.random.Generator, age: int) -> str:
@@ -139,7 +128,7 @@ def _sample_marital_status(rng: np.random.Generator, age: int) -> str:
 def _sample_dependents(rng: np.random.Generator, age: int, marital_status: str) -> int:
     if age < 24:
         weights = [0.84, 0.13, 0.03, 0.00, 0.00, 0.00, 0.00]
-    elif marital_status in {"Casado", "Uniao Estavel"} and 28 <= age <= 55:
+    elif marital_status in {"Casado", "União Estável"} and 28 <= age <= 55:
         weights = [0.20, 0.25, 0.30, 0.16, 0.06, 0.02, 0.01]
     elif marital_status == "Solteiro":
         weights = [0.66, 0.20, 0.10, 0.03, 0.01, 0.00, 0.00]
@@ -162,13 +151,14 @@ def _sample_income(
     age_curve = 0.72 + min(age, 58) / 58
     if age >= 67:
         age_curve *= 0.88
-    log_noise = float(rng.lognormal(mean=math.log(2100), sigma=0.55))
-    mixture_boost = float(rng.lognormal(mean=0.0, sigma=0.32)) if rng.random() < 0.12 else 1.0
+    variability = income_variability_for_occupation(occupation)
+    log_noise = float(rng.lognormal(mean=math.log(2100), sigma=0.52 * variability))
+    mixture_boost = float(rng.lognormal(mean=0.0, sigma=0.30 * variability)) if rng.random() < 0.12 else 1.0
     income = (
         log_noise
         * age_curve
         * EDUCATION_INCOME_MULTIPLIER[education]
-        * OCCUPATION_INCOME_MULTIPLIER[occupation]
+        * income_multiplier_for_occupation(occupation)
         * REGION_INCOME_MULTIPLIER[region]
         * mixture_boost
     )
@@ -231,7 +221,7 @@ def generate_calibration_dataset(
 
 def coerce_model_dtypes(df: pd.DataFrame, metadata: DatasetMetadata | None = None) -> pd.DataFrame:
     """Converte colunas canônicas do modelo para dtypes estáveis do pandas."""
-    coerced = df.copy()
+    coerced = normalize_text_frame(df)
     metadata = metadata or default_metadata()
     for column in metadata.model_columns:
         if column not in coerced.columns:
@@ -242,7 +232,8 @@ def coerce_model_dtypes(df: pd.DataFrame, metadata: DatasetMetadata | None = Non
         elif column_meta.kind == "numeric":
             coerced[column] = pd.to_numeric(coerced[column], errors="coerce").astype(float)
         elif column_meta.kind == "categorical":
-            coerced[column] = coerced[column].astype("string")
+            coerced[column] = coerced[column].map(lambda value: value if pd.isna(value) else str(value)).astype("string")
+    coerced = normalize_text_frame(coerced)
     return coerced
 
 

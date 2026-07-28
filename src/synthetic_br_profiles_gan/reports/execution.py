@@ -28,7 +28,7 @@ def exportar_resultados(
     elif suffix == ".xlsx":
         dataset.to_excel(dataset_path, index=False)
     elif suffix == ".csv":
-        dataset.to_csv(dataset_path, index=False)
+        dataset.to_csv(dataset_path, index=False, encoding="utf-8-sig")
     else:
         raise ValueError("Formato de dataset nao suportado. Use .parquet, .xlsx ou .csv.")
 

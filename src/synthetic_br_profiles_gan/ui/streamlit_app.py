@@ -184,11 +184,18 @@ def _render_artifact_details(st: Any, artifact: Any) -> None:
             [
                 f"Artefato: `{artifact.artifact_id}`",
                 f"schema {artifact.schema_version}",
+                f"vocabulário {artifact.categorical_vocabulary_version}",
                 f"seed {artifact.seed}" if artifact.seed is not None else "seed não registrada",
                 f"treino {artifact.train_rows}" if artifact.train_rows is not None else "treino não registrado",
             ]
         )
     )
+    if getattr(artifact, "is_legacy_vocabulary", False) and artifact.model in {"ctgan", "simple_gan"}:
+        st.warning(
+            "Este modelo foi treinado com a versão anterior do vocabulário. A saída terá acentuação normalizada, "
+            "mas o modelo não conhece as novas ocupações. Para obter toda a diversidade atual, utilize um modelo "
+            "treinado com o vocabulário mais recente."
+        )
 
 
 def _render_custom_columns(st: Any) -> list[str]:

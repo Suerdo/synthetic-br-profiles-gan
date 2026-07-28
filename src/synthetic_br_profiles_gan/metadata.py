@@ -14,6 +14,12 @@ from synthetic_br_profiles_gan.domain.brazil import (
     STATE_REGION,
     all_ddds,
 )
+from synthetic_br_profiles_gan.domain.occupations import occupation_categories
+from synthetic_br_profiles_gan.localization import (
+    CATEGORICAL_VOCABULARY_VERSION,
+    DATA_LOCALE,
+    UNICODE_NORMALIZATION,
+)
 
 
 MODEL_COLUMNS = [
@@ -60,22 +66,13 @@ PROXIMITY_EXCLUDED_COLUMNS = ["Nome", "Data_Nascimento", *IDENTIFIER_COLUMNS]
 GENDER_CATEGORIES = ["Feminino", "Masculino", "Outro"]
 EDUCATION_CATEGORIES = [
     "Fundamental",
-    "Ensino Medio",
+    "Ensino Médio",
     "Superior Incompleto",
     "Superior Completo",
-    "Pos-graduacao",
+    "Pós-graduação",
 ]
-MARITAL_STATUS_CATEGORIES = ["Solteiro", "Casado", "Uniao Estavel", "Divorciado", "Viuvo"]
-OCCUPATION_CATEGORIES = [
-    "Estudante",
-    "Servicos Gerais",
-    "Tecnico",
-    "Analista",
-    "Coordenador",
-    "Gerente",
-    "Autonomo",
-    "Aposentado",
-]
+MARITAL_STATUS_CATEGORIES = ["Solteiro", "Casado", "União Estável", "Divorciado", "Viúvo"]
+OCCUPATION_CATEGORIES = occupation_categories()
 
 
 @dataclass(frozen=True)
@@ -187,14 +184,14 @@ def default_metadata() -> DatasetMetadata:
             "categorical",
             categories=states,
             dependencies=["Regiao"],
-            description="Estado deve pertencer a Regiao.",
+            description="Estado deve pertencer à região.",
         ),
         "Municipio": ColumnMetadata(
             "Municipio",
             "categorical",
             categories=municipalities,
             dependencies=["Estado"],
-            description="Municipio deve pertencer a Estado.",
+            description="Município deve pertencer ao estado.",
         ),
         "Escolaridade": ColumnMetadata("Escolaridade", "categorical", categories=EDUCATION_CATEGORIES),
         "Estado_Civil": ColumnMetadata("Estado_Civil", "categorical", categories=MARITAL_STATUS_CATEGORIES),
@@ -220,7 +217,7 @@ def default_metadata() -> DatasetMetadata:
             "Data_Nascimento",
             "date",
             dependencies=["Idade"],
-            description="Data de nascimento deve produzir Idade na data de referência configurada.",
+            description="Data de nascimento deve produzir a idade na data de referência configurada.",
         ),
         "CPF": ColumnMetadata("CPF", "identifier"),
         "CNH": ColumnMetadata("CNH", "identifier"),

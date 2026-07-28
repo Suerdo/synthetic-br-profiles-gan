@@ -21,6 +21,11 @@ from synthetic_br_profiles_gan.config import ConfigDict, deep_merge, save_yaml_c
 from synthetic_br_profiles_gan.exceptions import ConfigurationError
 from synthetic_br_profiles_gan.manifest import environment_info, get_git_commit, write_json
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
+from synthetic_br_profiles_gan.localization import (
+    CATEGORICAL_VOCABULARY_VERSION,
+    DATA_LOCALE,
+    UNICODE_NORMALIZATION,
+)
 from synthetic_br_profiles_gan.pipeline import DEFAULT_PIPELINE_CONFIG, train_synthesizer
 from synthetic_br_profiles_gan.utils.reproducibility import set_global_seed
 
@@ -160,6 +165,9 @@ def build_training_manifest(
         "created_at_utc": started_at.astimezone(timezone.utc).isoformat(),
         "ended_at_utc": ended_at.astimezone(timezone.utc).isoformat(),
         "project_version": _project_version(),
+        "data_locale": DATA_LOCALE,
+        "unicode_normalization": UNICODE_NORMALIZATION,
+        "categorical_vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
         "seed": int(seed),
         "training_required": bool(training_required),
         "train_rows": int(train_rows),

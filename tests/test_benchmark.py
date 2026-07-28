@@ -82,8 +82,8 @@ def _fake_pipeline_result(model_name: str, config: dict) -> dict:
             },
             "grouped_income": {
                 "Regiao": {"absolute_difference": {"Sudeste": 100.0, "Sul": 50.0}},
-                "Escolaridade": {"absolute_difference": {"Ensino Medio": 80.0}},
-                "Ocupacao": {"absolute_difference": {"Tecnico": 60.0}},
+                "Escolaridade": {"absolute_difference": {"Ensino Médio": 80.0}},
+                "Ocupacao": {"absolute_difference": {"Técnico": 60.0}},
                 "Faixa_Etaria": {"absolute_difference": {"25-34": 70.0}},
             },
         },

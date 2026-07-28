@@ -14,6 +14,11 @@ import pandas as pd
 from synthetic_br_profiles_gan.column_catalog import ColumnSelection, resolve_column_selection
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge
 from synthetic_br_profiles_gan.exceptions import ConfigurationError, StructuralValidationError
+from synthetic_br_profiles_gan.localization import (
+    CATEGORICAL_VOCABULARY_VERSION,
+    DATA_LOCALE,
+    UNICODE_NORMALIZATION,
+)
 from synthetic_br_profiles_gan.manifest import environment_info, get_git_commit, write_json
 from synthetic_br_profiles_gan.metadata import default_metadata
 from synthetic_br_profiles_gan.models.programmatic import ProgrammaticSynthesizer
@@ -196,12 +201,18 @@ def build_generation_manifest(
     generation_accounting: dict[str, Any],
 ) -> dict[str, Any]:
     """Cria o manifesto de uma geração exportada."""
+    source_vocabulary_version = _source_vocabulary_version(training_manifest)
     return {
         "schema_version": 1,
         "artifact_type": "synthetic_dataset",
         "created_at_utc": started_at.astimezone(timezone.utc).isoformat(),
         "ended_at_utc": ended_at.astimezone(timezone.utc).isoformat(),
         "model": model,
+        "data_locale": DATA_LOCALE,
+        "unicode_normalization": UNICODE_NORMALIZATION,
+        "source_model_vocabulary_version": source_vocabulary_version,
+        "output_vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
+        "legacy_value_normalization_applied": bool(source_vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
         "model_artifact": model_artifact,
         "source_training_manifest": None if training_manifest is None else training_manifest.get("created_at_utc"),
         "rows": int(rows),
@@ -260,7 +271,7 @@ def _validate_generation_request(request: GenerationRequest, model: str | None, 
 def _export_dataset(dataset: pd.DataFrame, output_path: Path, output_format: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_format == "csv":
-        dataset.to_csv(output_path, index=False, encoding="utf-8", sep=";")
+        dataset.to_csv(output_path, index=False, encoding="utf-8-sig", sep=";")
         return
     if output_format == "json":
         with output_path.open("w", encoding="utf-8") as file:
@@ -274,6 +285,15 @@ def _export_dataset(dataset: pd.DataFrame, output_path: Path, output_format: str
 
 def _generation_manifest_path(output_path: Path) -> Path:
     return output_path.with_suffix(".manifest.json")
+
+
+def _source_vocabulary_version(training_manifest: dict[str, Any] | None) -> int:
+    if training_manifest is None:
+        return CATEGORICAL_VOCABULARY_VERSION
+    try:
+        return int(training_manifest.get("categorical_vocabulary_version", 1))
+    except (TypeError, ValueError):
+        return 1
 
 
 def _normalize_model_name(model: str | None) -> str | None:

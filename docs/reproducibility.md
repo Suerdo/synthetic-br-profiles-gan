@@ -38,6 +38,14 @@ Para o `ProgrammaticSynthesizer`, duas gerações com o mesmo artefato salvo, me
 
 O manifesto da geração registra essa limitação no campo `reproducibility`.
 
+## Vocabulário e Unicode
+
+Os manifestos distinguem a versão do schema da versão do vocabulário categórico. A versão atual dos valores textuais é `categorical_vocabulary_version: 2`, com `data_locale: pt-BR` e `unicode_normalization: NFC`.
+
+Durante a geração, valores textuais são normalizados para Unicode NFC antes da validação e exportação. Aliases explícitos convertem valores legados como `Ensino Medio`, `Pos-graduacao`, `Uniao Estavel`, `Viuvo`, `Servicos Gerais`, `Tecnico`, `Autonomo`, `Sao Paulo` e `Joao Pessoa` para as formas canônicas acentuadas.
+
+Um artefato neural antigo continua carregando se o schema de colunas for compatível. Porém, ele não passa a conhecer automaticamente ocupações adicionadas na versão `2`; para isso, o modelo precisa ser treinado novamente com a base de calibração atual. O manifesto de geração registra `source_model_vocabulary_version`, `output_vocabulary_version` e `legacy_value_normalization_applied`.
+
 ## Seleção de colunas
 
 A seleção por `--columns` ou `--preset` ocorre depois da geração interna completa e depois da validação estrutural das 18 colunas finais. Portanto, ela não muda o contrato dos sintetizadores nem elimina dependências necessárias durante o pós-processamento.

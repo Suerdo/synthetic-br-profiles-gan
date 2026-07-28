@@ -131,7 +131,8 @@ def artifact_label(artifact: SavedModelArtifact) -> str:
     created = artifact.created_at_utc or "data não registrada"
     train_rows = "treino não registrado" if artifact.train_rows is None else f"treino {artifact.train_rows}"
     seed = "seed não registrada" if artifact.seed is None else f"seed {artifact.seed}"
-    return f"{artifact.artifact_id} · {created} · {train_rows} · {seed}"
+    vocabulary = f"vocabulário {artifact.categorical_vocabulary_version}"
+    return f"{artifact.artifact_id} · {created} · {train_rows} · {seed} · {vocabulary}"
 
 
 def validation_summary(validation_report: dict[str, Any]) -> list[tuple[str, bool]]:

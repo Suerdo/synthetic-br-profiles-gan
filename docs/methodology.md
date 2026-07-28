@@ -18,17 +18,31 @@ As dependências estruturais são explicitadas em `metadata.py` e testadas:
 - `Renda` usa distribuição assimétrica e depende de idade, escolaridade, ocupação e região;
 - `Estado_Civil` e `Dependentes` dependem de idade e estado civil.
 
-## 2. Split
+## 2. Vocabulário categórico em português brasileiro
+
+Os valores textuais do dataset usam português brasileiro como idioma canônico. A versão atual do vocabulário categórico é `2`, com normalização Unicode NFC e categorias acentuadas, como `Ensino Médio`, `Pós-graduação`, `União Estável`, `Viúvo`, `Serviços Gerais`, `Técnico`, `Autônomo` e municípios com grafia brasileira correta.
+
+Os nomes técnicos das colunas permanecem inalterados. Por exemplo, `Genero`, `Regiao`, `Municipio`, `Ocupacao`, `Estado_Civil` e `Titulo_Eleitor` continuam sendo identificadores internos usados por modelos, manifestos, CLI, validações, benchmarks e interface. A acentuação aparece nos valores categóricos e nos labels apresentados ao usuário.
+
+O catálogo de ocupações fica em `domain/occupations.py`. Cada ocupação registra nome, grupo, escolaridades permitidas, idade mínima, idade máxima quando aplicável, multiplicador de renda, peso de amostragem e descrição. Esse catálogo é a fonte central para amostragem, validação, cálculo de renda e documentação.
+
+As regras de ocupação são sintéticas e configuráveis. Elas evitam combinações claramente incompatíveis, como `Fundamental` com `Médico` ou `Ensino Médio` com `Engenheiro`, mas preservam variação probabilística quando há várias ocupações elegíveis. Pesos etários aumentam a probabilidade de `Estagiário` e `Estudante` em faixas jovens, de cargos de gestão em faixas mais maduras e de `Aposentado` em idades mais altas.
+
+A renda continua dependendo de idade, escolaridade, ocupação, região e ruído estocástico. Os multiplicadores por ocupação são parâmetros heurísticos do gerador sintético, não estatísticas oficiais do mercado de trabalho. O cálculo não usa gênero e não introduz diferença de renda por gênero.
+
+Modelos neurais treinados com vocabulário anterior continuam compatíveis. A saída recebe aliases e normalização de acentuação antes da validação, mas o modelo antigo não passa a produzir automaticamente novas ocupações. Para que `SimpleTabularGAN` ou `CTGANSynthesizer` aprendam o catálogo ampliado, é necessário retreinamento com a base de calibração atual.
+
+## 3. Split
 
 A calibração é dividida em treino e holdout com seed configurável. Modelos treináveis usam somente treino. A avaliação compara os dados sintéticos contra treino e holdout separadamente.
 
-## 3. Modelos
+## 4. Modelos
 
 - `ProgrammaticSynthesizer`: baseline programático.
 - `SimpleTabularGAN`: GAN tabular densa simples preservada do projeto original.
 - `CTGANSynthesizer`: CTGAN real via biblioteca standalone `ctgan`.
 
-## 4. Treinamento e geração separados
+## 5. Treinamento e geração separados
 
 O projeto possui dois fluxos reutilizáveis além do pipeline experimental completo:
 
@@ -37,7 +51,7 @@ O projeto possui dois fluxos reutilizáveis além do pipeline experimental compl
 
 Essa separação permite treinar `simple_gan` ou `ctgan` uma vez e reutilizar o modelo para várias gerações com diferentes seeds e quantidades de linhas. O baseline programático não possui etapa neural; o artefato salvo registra `training_required: false`.
 
-## 5. Seleção de colunas para exportação
+## 6. Seleção de colunas para exportação
 
 A seleção de colunas é uma projeção de saída. Ela não altera o treinamento, o carregamento dos modelos nem o contrato interno dos sintetizadores.
 
@@ -52,11 +66,13 @@ Essa regra preserva dependências internas como:
 
 Essas dependências podem aparecer no manifesto da geração, mas não são adicionadas automaticamente ao arquivo exportado. O catálogo em `column_catalog.py` concentra descrições, grupos, tipos, dependências e presets para reutilização futura em interface.
 
-## 6. Pós-processamento
+## 7. Pós-processamento
 
 As saídas do modelo viram `SyntheticProfileContext`. A partir desse contexto, são derivados nome, data de nascimento, telefone e identificadores fictícios. A data de nascimento é sorteada dentro do intervalo que produz exatamente a idade informada na data de referência.
 
-## 7. Validação e avaliação
+Antes da validação e da exportação, valores textuais finais passam por normalização Unicode NFC e por aliases explícitos de compatibilidade com o vocabulário legado. A normalização não remove acentos nem translitera os dados para ASCII.
+
+## 8. Validação e avaliação
 
 A seleção de linhas usa schema, tipos, domínios, regras semânticas, documentos matematicamente válidos e duplicidade. O discriminador da GAN simples não é usado como probabilidade calibrada nem como filtro principal.
 

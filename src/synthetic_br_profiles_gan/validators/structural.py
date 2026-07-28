@@ -15,7 +15,9 @@ from synthetic_br_profiles_gan.domain.brazil import (
     STATE_MUNICIPALITIES,
     region_for_state,
 )
+from synthetic_br_profiles_gan.domain.occupations import is_occupation_compatible
 from synthetic_br_profiles_gan.generators.demographics import calcular_idade, parse_data_nascimento
+from synthetic_br_profiles_gan.localization import normalize_text_frame
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 from synthetic_br_profiles_gan.validators.brazilian import (
     extrair_ddd,
@@ -53,6 +55,7 @@ def validate_profile_dataframe(
 ) -> ValidationResult:
     """Valida um DataFrame de perfil final ou de modelo contra os metadados do projeto."""
     metadata = metadata or default_metadata()
+    df = normalize_text_frame(df)
     required_columns = metadata.required_columns(final=final)
     valid_mask = pd.Series(True, index=df.index)
     counts: Counter[str] = Counter()
@@ -138,6 +141,23 @@ def validate_profile_dataframe(
         mismatch |= ddd_numeric.isna()
         counts["ddd_estado_incompativel"] += int(mismatch.sum())
         valid_mask &= ~mismatch
+
+    if {"Ocupacao", "Escolaridade", "Idade"}.issubset(df.columns):
+        occupation_mismatch = []
+        for _, row in df.iterrows():
+            try:
+                occupation_mismatch.append(
+                    not is_occupation_compatible(
+                        str(row["Ocupacao"]),
+                        str(row["Escolaridade"]),
+                        int(row["Idade"]),
+                    )
+                )
+            except (TypeError, ValueError):
+                occupation_mismatch.append(True)
+        occupation_mismatch_series = pd.Series(occupation_mismatch, index=df.index)
+        counts["ocupacao_escolaridade_idade_incompativel"] += int(occupation_mismatch_series.sum())
+        valid_mask &= ~occupation_mismatch_series
 
     if final:
         _validate_final_fields(df, valid_mask, counts, reference)
