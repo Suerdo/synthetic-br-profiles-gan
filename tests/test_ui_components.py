@@ -426,12 +426,18 @@ class UIComponentsTest(unittest.TestCase):
         self.assertIn("st.container(border=True)", source)
         self.assertIn("Resumo Operacional", source)
         self.assertIn("Qualidade dos Dados", source)
+        self.assertIn("Diversidade e Memorização", source)
+        self.assertIn("Realismo Condicional", source)
         self.assertIn("Execuções Recentes", source)
         self.assertIn("Tipo", source)
         self.assertIn("Modelo", source)
         self.assertIn("Status", source)
         self.assertIn("Como interpretar os indicadores", glossary_source)
         self.assertIn("Execuções registradas", glossary_source)
+        self.assertIn("Duplicidade de combinações-base", glossary_source)
+        self.assertIn("Correspondência exata com holdout", glossary_source)
+        self.assertIn("Realismo condicional", glossary_source)
+        self.assertIn("Cauda superior", glossary_source)
         self.assertIn("Exact train match rate", glossary_source)
         self.assertIn("Fonte: manifesto de execução", source)
 
@@ -494,11 +500,47 @@ class UIComponentsTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (run_dir / "evaluation.json").write_text(
+                json.dumps(
+                    {
+                        "privacy": {
+                            "unique_combinations": 9,
+                            "unique_combination_rate": 0.9,
+                            "exact_train_match_rate": 0.1,
+                            "duplicate_base_rows": {
+                                "duplicate_row_rate": 0.1,
+                                "duplicated_occurrences": 1,
+                                "duplicated_groups": 1,
+                            },
+                            "exact_matches": {
+                                "train": {"exact_match_count": 1, "exact_match_rate": 0.1},
+                                "holdout": {"exact_match_count": 0, "exact_match_rate": 0.0},
+                            },
+                        },
+                        "conditional_income": {
+                            "summary": {
+                                "status": "diagnóstico",
+                                "conditional_groups_compared": 2,
+                                "max_conditional_income_wasserstein": 100.0,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             records = load_history(root)
             self.assertEqual(len(records), 1)
             self.assertEqual(filter_history(records, model="programmatic")[0].identifier, "run-a")
             rows = history_as_rows(records)
             self.assertEqual(rows[0]["status"], "approved")
+            self.assertEqual(rows[0]["duplicidade_base"], 0.1)
+            self.assertEqual(rows[0]["match_exato_treino"], 0.1)
+            self.assertEqual(rows[0]["combinações_únicas"], 9)
+
+            snapshot = build_governance_snapshot(config)
+            self.assertTrue(any(item["indicador"] == "Taxa de duplicidade" for item in snapshot.diversity_memorization_indicators))
+            self.assertTrue(any(item["indicador"] == "Maior desvio condicional" for item in snapshot.conditional_realism_indicators))
 
     def test_compliance_matrix_uses_allowed_statuses_without_certification_score(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

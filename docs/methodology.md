@@ -83,3 +83,10 @@ Quando a geração ocorre em batches, cada lote é validado para diagnóstico, m
 As métricas estatísticas, relacionais, de diversidade, de privacidade e quality gates são calculadas em módulos independentes dos modelos. Distâncias de vizinhança, DCR, NNDR e matches exatos usam os atributos de modelo; identificadores derivados como CPF, RG, CNH, título, telefone, nome e data de nascimento ficam fora das métricas de proximidade.
 
 Distâncias de Wasserstein são registradas em escala absoluta e também normalizadas pelo IQR da referência, com fallback para desvio-padrão quando o IQR é zero. Essa normalização facilita comparar variáveis em escalas diferentes sem remover a métrica absoluta.
+## Diversidade, memorização e realismo condicional
+
+A avaliação de privacidade e diversidade passou a distinguir duplicidade de combinações-base, correspondência exata com treino e correspondência exata com holdout. A comparação usa apenas as 11 colunas-base do modelo, excluindo identificadores derivados como CPF, telefone e documentos.
+
+A renda também passou a ser avaliada por grupos condicionais de ocupação, escolaridade, faixa etária e região. O `income_model_version` registra a versão da calibração sintética de renda separadamente da versão do vocabulário categórico.
+
+As métricas são diagnósticas: apoiam avaliação de risco e qualidade, mas não garantem anonimização absoluta nem representatividade da população brasileira. Detalhes estão em `docs/privacy-and-diversity.md` e `docs/income-realism.md`.

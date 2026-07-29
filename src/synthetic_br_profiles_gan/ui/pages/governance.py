@@ -47,6 +47,22 @@ def render_governance_page(st: Any, config: UIConfig, snapshot: GovernanceSnapsh
     with st.container(border=True):
         _render_governance_section_header(
             st,
+            "Diversidade e Memorização",
+            "Fonte: evaluation.json → privacy. Calculado sobre as 11 colunas-base, sem identificadores derivados.",
+        )
+        st.dataframe(snapshot.diversity_memorization_indicators, use_container_width=True)
+
+    with st.container(border=True):
+        _render_governance_section_header(
+            st,
+            "Realismo Condicional",
+            "Fonte: evaluation.json → conditional_income e manifest.json → income_model_version.",
+        )
+        st.dataframe(snapshot.conditional_realism_indicators, use_container_width=True)
+
+    with st.container(border=True):
+        _render_governance_section_header(
+            st,
             "Execuções Recentes",
             "Fonte: manifestos de execução, benchmark, treinamento e geração da interface.",
         )
@@ -144,6 +160,16 @@ def _render_glossary(st: Any) -> None:
 **Linhas inválidas:** linhas com problemas de domínio, consistência, nulidade, documento ou relacionamento estrutural.
 
 **Identificadores duplicados:** repetições encontradas em CPF, CNH, RG, título de eleitor ou telefone dentro da mesma geração.
+
+**Duplicidade de combinações-base:** repetição exata das 11 colunas produzidas pelo modelo. Identificadores derivados não participam.
+
+**Correspondência exata com treino:** percentual de registros sintéticos cujas 11 colunas-base coincidem com pelo menos um registro de treinamento. A métrica isolada não comprova vazamento de dados.
+
+**Correspondência exata com holdout:** métrica de controle contra registros não usados no treino. Ela ajuda a distinguir memorização de coincidências inerentes à distribuição.
+
+**Realismo condicional:** capacidade de preservar distribuições dentro de contextos específicos, como renda de uma ocupação considerando escolaridade e idade.
+
+**Cauda superior:** região dos valores mais altos da distribuição, avaliada por percentis como p95 e p99.
 
 **Cobertura de ocupações:** proporção das ocupações canônicas reproduzidas pelo modelo na amostra avaliada.
 

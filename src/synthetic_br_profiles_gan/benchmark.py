@@ -187,9 +187,16 @@ RUN_SUMMARY_COLUMNS = [
     "genero_tvd",
     "correlation_difference",
     "duplicate_row_rate",
+    "duplicate_base_row_rate",
+    "duplicate_base_duplicated_occurrences",
+    "duplicate_base_duplicated_groups",
+    "duplicate_base_largest_group",
     "unique_combination_rate",
+    "unique_combinations",
     "exact_train_match_rate",
+    "exact_train_match_count",
     "exact_holdout_match_rate",
+    "exact_holdout_match_count",
     "dcr",
     "nndr",
     "memory_before_training_mb",
@@ -1941,6 +1948,10 @@ def summarize_run(
     coherence = vocabulary.get("coherence", {})
     locale = vocabulary.get("locale", {})
     vocabulary_gates = vocabulary.get("quality_gates", {})
+    duplicate_base = privacy.get("duplicate_base_rows") if isinstance(privacy.get("duplicate_base_rows"), dict) else {}
+    exact_matches = privacy.get("exact_matches") if isinstance(privacy.get("exact_matches"), dict) else {}
+    exact_train = exact_matches.get("train") if isinstance(exact_matches.get("train"), dict) else {}
+    exact_holdout = exact_matches.get("holdout") if isinstance(exact_matches.get("holdout"), dict) else {}
     return {
         "benchmark_id": benchmark_id,
         "run_id": result["run_id"],
@@ -1969,9 +1980,16 @@ def summarize_run(
         "genero_tvd": genero.get("total_variation_distance"),
         "correlation_difference": correlation.get("mean_abs_difference"),
         "duplicate_row_rate": privacy.get("duplicate_row_rate"),
+        "duplicate_base_row_rate": duplicate_base.get("duplicate_row_rate"),
+        "duplicate_base_duplicated_occurrences": duplicate_base.get("duplicated_occurrences"),
+        "duplicate_base_duplicated_groups": duplicate_base.get("duplicated_groups"),
+        "duplicate_base_largest_group": duplicate_base.get("largest_duplicate_group"),
         "unique_combination_rate": privacy.get("unique_combination_rate"),
+        "unique_combinations": privacy.get("unique_combinations"),
         "exact_train_match_rate": privacy.get("exact_train_match_rate"),
+        "exact_train_match_count": exact_train.get("exact_match_count"),
         "exact_holdout_match_rate": privacy.get("exact_holdout_match_rate"),
+        "exact_holdout_match_count": exact_holdout.get("exact_match_count"),
         "dcr": dcr.get("mean"),
         "nndr": nndr.get("mean"),
         "memory_before_training_mb": resources.get("memory_before_training_mb"),
@@ -2088,11 +2106,38 @@ def flatten_run_metrics(
     for group, metric in holdout_metrics.get("grouped_income", {}).items():
         add("relationships", "grouped_income_mean_abs_difference", group, _mean_dict_values(metric.get("absolute_difference", {})), details=metric.get("absolute_difference", {}))
 
+    conditional_income = evaluation.get("conditional_income", {})
+    conditional_summary = conditional_income.get("summary", {}) if isinstance(conditional_income, dict) else {}
+    for metric_name in [
+        "conditional_groups_compared",
+        "max_conditional_income_wasserstein",
+        "mean_conditional_income_wasserstein",
+        "max_abs_p95_difference",
+        "max_abs_p99_difference",
+        "occupation_income_rank_correlation",
+        "tail_events",
+        "groups_with_excessive_tail",
+    ]:
+        add("conditional_income", metric_name, None, conditional_summary.get(metric_name))
+
     privacy = evaluation.get("privacy", {})
+    duplicate_base = privacy.get("duplicate_base_rows") if isinstance(privacy.get("duplicate_base_rows"), dict) else {}
+    exact_matches = privacy.get("exact_matches") if isinstance(privacy.get("exact_matches"), dict) else {}
+    exact_train = exact_matches.get("train") if isinstance(exact_matches.get("train"), dict) else {}
+    exact_holdout = exact_matches.get("holdout") if isinstance(exact_matches.get("holdout"), dict) else {}
     add("privacy", "duplicate_row_rate", None, privacy.get("duplicate_row_rate"))
+    add("privacy", "duplicate_base_row_rate", None, duplicate_base.get("duplicate_row_rate"))
+    add("privacy", "duplicate_base_duplicated_occurrences", None, duplicate_base.get("duplicated_occurrences"))
+    add("privacy", "duplicate_base_duplicated_groups", None, duplicate_base.get("duplicated_groups"))
+    add("privacy", "duplicate_base_largest_group", None, duplicate_base.get("largest_duplicate_group"))
     add("privacy", "unique_combination_rate", None, privacy.get("unique_combination_rate"))
+    add("privacy", "unique_combinations", None, privacy.get("unique_combinations"))
     add("privacy", "exact_train_match_rate", None, privacy.get("exact_train_match_rate"))
+    add("privacy", "exact_train_match_count", None, exact_train.get("exact_match_count"))
+    add("privacy", "distinct_train_rows_matched", None, exact_train.get("distinct_reference_rows_matched"))
     add("privacy", "exact_holdout_match_rate", None, privacy.get("exact_holdout_match_rate"))
+    add("privacy", "exact_holdout_match_count", None, exact_holdout.get("exact_match_count"))
+    add("privacy", "distinct_holdout_rows_matched", None, exact_holdout.get("distinct_reference_rows_matched"))
     train_nearest = privacy.get("nearest_neighbor_train", {})
     dcr = train_nearest.get("distance_to_closest_record") or {}
     nndr = train_nearest.get("nearest_neighbor_distance_ratio") or {}
@@ -2571,6 +2616,17 @@ def _write_benchmark_outputs(
                 export_json=export_json,
             )
         )
+    if config["benchmark"].get("type") == "income_realism":
+        outputs.update(
+            _write_income_realism_outputs(
+                benchmark_dir=benchmark_dir,
+                long_frame=long_frame,
+                summary_frame=summary_frame,
+                export_csv=export_csv,
+                export_parquet=export_parquet,
+                export_json=export_json,
+            )
+        )
 
     manifest = _benchmark_manifest(
         benchmark_id=benchmark_id,
@@ -2635,6 +2691,55 @@ def _write_vocabulary_quality_outputs(
             ),
         }
         outputs["raw_vs_final_summary_json"] = write_json(payload, benchmark_dir / "raw_vs_final_summary.json")
+    return outputs
+
+
+def _write_income_realism_outputs(
+    benchmark_dir: Path,
+    long_frame: pd.DataFrame,
+    summary_frame: pd.DataFrame,
+    export_csv: bool,
+    export_parquet: bool,
+    export_json: bool,
+) -> dict[str, Path]:
+    outputs: dict[str, Path] = {}
+    if "metric_group" not in long_frame.columns:
+        income_frame = pd.DataFrame(columns=long_frame.columns)
+    else:
+        income_frame = long_frame[long_frame["metric_group"].astype(str).eq("conditional_income")].copy()
+    summary_metrics = income_frame.pivot_table(
+        index=["model", "seed", "train_size"],
+        columns="metric_name",
+        values="value",
+        aggfunc="first",
+    ).reset_index() if not income_frame.empty else pd.DataFrame()
+    datasets = {
+        "conditional_income_comparison": income_frame,
+        "conditional_income_summary": summary_metrics,
+        "conditional_income_tail_events": income_frame[
+            income_frame.get("metric_name", pd.Series(dtype=str)).astype(str).eq("tail_events")
+        ].copy() if not income_frame.empty else pd.DataFrame(columns=income_frame.columns),
+    }
+    if export_parquet:
+        for name, frame in datasets.items():
+            path = benchmark_dir / f"{name}.parquet"
+            frame.to_parquet(path, index=False)
+            outputs[f"{name}_parquet"] = path
+    if export_csv:
+        for name, frame in datasets.items():
+            path = benchmark_dir / f"{name}.csv"
+            frame.to_csv(path, index=False)
+            outputs[f"{name}_csv"] = path
+    if export_json:
+        payload = {
+            "summary": _json_safe_records(summary_frame),
+            "conditional_income_metrics": _json_safe_records(summary_metrics),
+            "interpretation": (
+                "Benchmark exploratório de realismo condicional de renda. As linhas detalhadas por grupo "
+                "ficam nos artefatos de cada execução do pipeline."
+            ),
+        }
+        outputs["income_plausibility_summary_json"] = write_json(payload, benchmark_dir / "income_plausibility_summary.json")
     return outputs
 
 

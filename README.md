@@ -420,6 +420,12 @@ A página de governança lê manifestos, histórico de modelos, validações, qu
 
 Ao selecionar `ctgan` ou `simple_gan`, o artefato mais recente daquele modelo é pré-selecionado por `created_at_utc`. Esse critério indica apenas recência, não melhor qualidade nem aprovação. Artefatos `Smoke`, `Experimental`, `Candidato`, `Legado` ou `Sem classificação` aparecem com avisos próprios.
 
+## Diversidade, memorização e renda condicional
+
+A avaliação diferencia duplicidade de combinações-base, correspondência exata com treino, correspondência exata com holdout e realismo condicional da renda. Essas métricas usam as 11 colunas-base do modelo e excluem identificadores derivados como CPF, telefone e documentos.
+
+Consulte `docs/privacy-and-diversity.md` e `docs/income-realism.md` para a representação canônica, os artefatos, os quality gates e as limitações de interpretação.
+
 ## Testes
 
 ```bash

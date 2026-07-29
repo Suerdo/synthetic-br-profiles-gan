@@ -137,3 +137,20 @@ O manifesto de geração preserva os campos existentes e acrescenta:
 ## Segurança dos modelos serializados
 
 `SimpleTabularGAN` e `CTGANSynthesizer` usam artefatos serializados, como `pickle` ou formatos equivalentes. O carregamento deve ficar restrito a diretórios de modelos produzidos ou previamente aprovados pela aplicação. Esta fase não implementa upload arbitrário de modelos nem seletor para arquivos `.pkl` enviados por usuários.
+## Artefatos de diversidade e renda condicional
+
+Novas execuções de pipeline podem produzir:
+
+- `memorization_metrics.json`;
+- `duplicate_base_rows.json`;
+- `exact_train_matches.json`;
+- `exact_holdout_matches.json`;
+- `conditional_income_summary.csv`;
+- `conditional_income_summary.parquet`;
+- `conditional_income_comparison.csv`;
+- `conditional_income_tail_events.csv`;
+- `income_plausibility_summary.json`.
+
+Esses arquivos complementam `evaluation.json` e preservam campos legados como `duplicate_row_rate`, `exact_train_match_rate`, `exact_holdout_match_rate`, `unique_combinations` e `unique_combination_rate`.
+
+Os arquivos de evidência usam hashes das combinações-base e não devem incluir nomes, CPF, telefone ou documentos.

@@ -90,6 +90,8 @@ def history_as_rows(records: Iterable[HistoryRecord]) -> list[dict[str, Any]]:
     """Converte registros em linhas seguras para exibição tabular."""
     rows: list[dict[str, Any]] = []
     for record in records:
+        privacy = _record_privacy(record)
+        duplicate_base = privacy.get("duplicate_base_rows") if isinstance(privacy.get("duplicate_base_rows"), dict) else {}
         rows.append(
             {
                 "tipo": record.kind,
@@ -101,6 +103,9 @@ def history_as_rows(records: Iterable[HistoryRecord]) -> list[dict[str, Any]]:
                 "treino": record.train_rows if record.train_rows is not None else "Não disponível",
                 "duração_s": record.duration_seconds if record.duration_seconds is not None else "Não disponível",
                 "vocabulário": record.vocabulary_version if record.vocabulary_version is not None else "Não disponível",
+                "duplicidade_base": _not_evaluated_if_none(duplicate_base.get("duplicate_row_rate")),
+                "match_exato_treino": _not_evaluated_if_none(privacy.get("exact_train_match_rate")),
+                "combinações_únicas": _not_evaluated_if_none(privacy.get("unique_combinations")),
                 "criado_em_utc": record.created_at_utc or "Não disponível",
                 "resumo": record.summary,
             }
@@ -227,6 +232,19 @@ def _read_json(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return content if isinstance(content, dict) else {}
+
+
+def _record_privacy(record: HistoryRecord) -> dict[str, Any]:
+    manifest = record.manifest if isinstance(record.manifest, dict) else {}
+    evaluation = manifest.get("evaluation")
+    if not isinstance(evaluation, dict):
+        evaluation = _read_json(record.path.parent / "evaluation.json")
+    privacy = evaluation.get("privacy") if isinstance(evaluation, dict) else None
+    return privacy if isinstance(privacy, dict) else {}
+
+
+def _not_evaluated_if_none(value: Any) -> Any:
+    return "Não avaliado" if value is None else value
 
 
 def _optional_int(value: Any) -> int | None:

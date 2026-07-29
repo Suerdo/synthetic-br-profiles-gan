@@ -689,3 +689,14 @@ O benchmark-piloto é uma ferramenta exploratória. Três seeds ainda não produ
 Os resultados dependem da base de calibração controlada. Como a calibração não representa perfeitamente a população brasileira, as conclusões devem ser interpretadas como comparação experimental dentro deste ambiente, não como medida final de qualidade populacional.
 
 O cenário de 1.000 registros é útil como limite inferior, mas o holdout de 250 linhas não oferece evidência robusta para categorias raras. O cenário de 5.000 registros funciona como referência operacional do piloto. O cenário de 20.000 registros é apenas o limite superior do experimento atual, não um limite máximo absoluto dos modelos.
+## Benchmark de realismo de renda e memorização
+
+Os benchmarks `income_realism` avaliam diversidade, correspondência exata e plausibilidade condicional da renda sem executar testes de capacidade. As configurações principais são:
+
+- `configs/benchmark-income-realism-baseline.yaml`, com `income_model_version: 1`;
+- `configs/benchmark-income-realism-v2-smoke.yaml`, para validação técnica pequena;
+- `configs/benchmark-income-realism-v2.yaml`, com `income_model_version: 2`.
+
+Os resultados antigos permanecem históricos. A comparação entre baseline e v2 deve considerar frequência de caudas, p95, p99, duplicidade de combinações-base, match exato com treino e holdout, custo computacional e estabilidade entre seeds.
+
+Nenhuma recomendação de artefato neural deve ser feita por uma única média. Gates obrigatórios continuam prevalecendo sobre scores agregados.

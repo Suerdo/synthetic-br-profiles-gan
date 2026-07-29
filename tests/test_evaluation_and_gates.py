@@ -19,6 +19,8 @@ from synthetic_br_profiles_gan.evaluation.metrics import (
     evaluate_synthetic_data,
     numeric_column_metrics,
 )
+from synthetic_br_profiles_gan.evaluation.income import conditional_income_report
+from synthetic_br_profiles_gan.evaluation.privacy import duplicate_base_row_metrics, exact_match_metrics
 from synthetic_br_profiles_gan.evaluation.quality_gates import evaluate_quality_gates
 from synthetic_br_profiles_gan.generation import select_valid_candidates
 
@@ -109,6 +111,79 @@ class EvaluationAndGatesTest(unittest.TestCase):
             },
         )
         self.assertEqual(nan_metric.status, "rejected")
+
+    def test_duplicate_base_row_metrics_distinguish_occurrences_and_groups(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "Idade": [30, 30, 30, 40, 40, 50],
+                "Genero": ["A", "A", "A", "B", "B", "C"],
+                "Renda": [1000.0, 1000.0, 1000.0, 2000.0, 2000.0, 3000.0],
+            }
+        )
+        metrics = duplicate_base_row_metrics(frame, ["Idade", "Genero", "Renda"])
+        self.assertEqual(metrics["total_rows"], 6)
+        self.assertEqual(metrics["unique_rows"], 3)
+        self.assertEqual(metrics["duplicated_occurrences"], 3)
+        self.assertEqual(metrics["duplicated_groups"], 2)
+        self.assertEqual(metrics["rows_in_duplicate_groups"], 5)
+        self.assertEqual(metrics["largest_duplicate_group"], 3)
+        self.assertEqual(metrics["duplicate_group_size_distribution"], {"2": 1, "3": 1})
+        self.assertNotIn("CPF", metrics["columns_used"])
+
+    def test_exact_match_metrics_canonicalize_values_and_reference_duplicates(self) -> None:
+        synthetic = pd.DataFrame(
+            {
+                "Escolaridade": ["Ensino Medio", "Superior Completo", "Pós-graduação"],
+                "Renda": [1000.004, 2000.0, 3000.0],
+                "Idade": [30.0, 40, 50],
+            }
+        )
+        reference = pd.DataFrame(
+            {
+                "Escolaridade": ["Ensino Médio", "Ensino Médio", "Superior Completo"],
+                "Renda": [1000.0, 1000.0, 2000.0],
+                "Idade": [30, 30, 40],
+            }
+        )
+        metrics = exact_match_metrics(synthetic, reference, ["Escolaridade", "Renda", "Idade"])
+        self.assertEqual(metrics["exact_match_count"], 2)
+        self.assertEqual(metrics["distinct_reference_rows_matched"], 2)
+        self.assertEqual(len(metrics["matched_row_hashes"]), 2)
+        self.assertTrue(all(len(item) == 64 for item in metrics["matched_row_hashes"]))
+
+    def test_duplicate_base_row_gate_is_informative(self) -> None:
+        evaluation = {
+            "privacy": {
+                "exact_train_match_rate": 0.0,
+                "duplicate_base_rows": {"duplicate_row_rate": 0.02},
+            },
+            "against_holdout": {
+                "categorical": {"Genero": {"total_variation_distance": 0.0}},
+                "correlations": {"summary": {"max_abs_difference": 0.0}},
+            },
+            "row_counts": {"synthetic": 100, "train": 100, "holdout": 20},
+        }
+        result = evaluate_quality_gates({"invalid_rows": 0, "reason_counts": {}}, evaluation)
+        self.assertEqual(result.status, "quarantined")
+        self.assertEqual(result.failures[0]["gate"], "duplicate_base_row_rate_max")
+
+    def test_conditional_income_report_uses_group_thresholds(self) -> None:
+        reference = pd.DataFrame(
+            {
+                "Ocupacao": ["Mecânico"] * 40 + ["Médico"] * 40,
+                "Escolaridade": ["Ensino Médio"] * 40 + ["Superior Completo"] * 40,
+                "Idade": [35] * 80,
+                "Regiao": ["Sudeste"] * 80,
+                "Renda": [3000 + index for index in range(40)] + [10000 + index for index in range(40)],
+            }
+        )
+        synthetic = reference.copy()
+        synthetic.loc[0, "Renda"] = 12000.0
+        report = conditional_income_report(reference, synthetic, minimum_group_rows=30)
+        self.assertGreater(report["summary"]["conditional_groups_compared"], 0)
+        self.assertIn("summary_rows", report)
+        self.assertIn("comparison_rows", report)
+        self.assertIn("tail_events", report)
 
 
 if __name__ == "__main__":

@@ -48,6 +48,14 @@ class OccupationProfile:
     sampling_weight: float
     description: str
     income_variability: float = 1.0
+    income_location_factor: float = 1.0
+    income_sigma: float = 0.42
+    high_tail_probability: float = 0.06
+    high_tail_scale: float = 0.32
+    education_effect_strength: float = 0.65
+    experience_effect_strength: float = 0.55
+    soft_lower_quantile: float = 0.05
+    soft_upper_quantile: float = 0.95
 
 
 OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
@@ -190,6 +198,11 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         1.12,
         0.50,
         "Ofício técnico de manutenção e reparo mecânico.",
+        income_sigma=0.36,
+        high_tail_probability=0.035,
+        high_tail_scale=0.26,
+        education_effect_strength=0.45,
+        experience_effect_strength=0.62,
     ),
     OccupationProfile(
         "Técnico",
@@ -320,6 +333,11 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         1.85,
         0.34,
         "Profissional de engenharia em áreas técnicas, industriais ou de infraestrutura.",
+        income_sigma=0.43,
+        high_tail_probability=0.075,
+        high_tail_scale=0.36,
+        education_effect_strength=0.50,
+        experience_effect_strength=0.68,
     ),
     OccupationProfile(
         "Arquiteto",
@@ -350,6 +368,11 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         2.10,
         0.20,
         "Profissional de odontologia e cuidados de saúde bucal.",
+        income_sigma=0.46,
+        high_tail_probability=0.09,
+        high_tail_scale=0.40,
+        education_effect_strength=0.45,
+        experience_effect_strength=0.70,
     ),
     OccupationProfile(
         "Médico",
@@ -360,6 +383,11 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         2.70,
         0.22,
         "Profissional de medicina em atuação clínica, hospitalar ou especializada.",
+        income_sigma=0.48,
+        high_tail_probability=0.10,
+        high_tail_scale=0.42,
+        education_effect_strength=0.42,
+        experience_effect_strength=0.72,
     ),
     OccupationProfile(
         "Coordenador",
@@ -380,6 +408,11 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         2.10,
         0.28,
         "Atividade gerencial com responsabilidade por equipes, orçamento ou resultados.",
+        income_sigma=0.45,
+        high_tail_probability=0.08,
+        high_tail_scale=0.38,
+        education_effect_strength=0.48,
+        experience_effect_strength=0.72,
     ),
     OccupationProfile(
         "Diretor",
@@ -390,6 +423,11 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         2.80,
         0.10,
         "Atividade executiva sintética associada a maior responsabilidade organizacional.",
+        income_sigma=0.50,
+        high_tail_probability=0.12,
+        high_tail_scale=0.45,
+        education_effect_strength=0.35,
+        experience_effect_strength=0.78,
     ),
     OccupationProfile(
         "Autônomo",
@@ -401,6 +439,10 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         0.86,
         "Trabalho independente em atividades variadas, com maior variabilidade de renda.",
         income_variability=1.22,
+        income_sigma=0.54,
+        high_tail_probability=0.10,
+        high_tail_scale=0.42,
+        education_effect_strength=0.45,
     ),
     OccupationProfile(
         "Microempreendedor",
@@ -412,6 +454,10 @@ OCCUPATION_CATALOG: tuple[OccupationProfile, ...] = (
         0.74,
         "Atividade econômica própria de pequeno porte, com maior variabilidade de renda.",
         income_variability=1.28,
+        income_sigma=0.56,
+        high_tail_probability=0.12,
+        high_tail_scale=0.44,
+        education_effect_strength=0.45,
     ),
     OccupationProfile(
         "Aposentado",

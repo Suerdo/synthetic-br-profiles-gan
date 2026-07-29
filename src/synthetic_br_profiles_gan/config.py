@@ -101,7 +101,7 @@ def _require_bool(config: ConfigDict, key: str, context: str) -> None:
 
 def validate_calibration_config(config: ConfigDict, context: str = "calibration") -> None:
     """Valida chaves, tipos e intervalos viáveis da configuração de calibração."""
-    _reject_unknown(config, {"seed", "num_rows", "holdout_fraction", "income", "age", "region_weights"}, context)
+    _reject_unknown(config, {"seed", "num_rows", "holdout_fraction", "income", "age", "region_weights", "income_model_version"}, context)
     _require_positive_int(config, "num_rows", context)
     _require_non_negative_int(config, "seed", context)
     try:
@@ -140,6 +140,8 @@ def validate_calibration_config(config: ConfigDict, context: str = "calibration"
     total_weight = sum(float(value) for value in weights.values())
     if total_weight <= 0:
         raise ConfigurationError(f"{context}.region_weights must have positive total weight.")
+    if "income_model_version" in config:
+        _require_positive_int(config, "income_model_version", context)
 
 
 def validate_generation_config(config: ConfigDict, context: str = "generation") -> None:
@@ -169,6 +171,7 @@ def validate_quality_gate_config(config: ConfigDict, context: str = "quality_gat
         "duplicated_identifier_max",
         "null_required_fields_max",
         "exact_train_match_rate_max",
+        "duplicate_base_row_rate_max",
         "total_variation_distance_max",
         "correlation_difference_max",
     }
@@ -197,7 +200,24 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
         validate_calibration_config(config, "models.programmatic")
         return
     if normalized in {"simple_gan", "simple_tabular_gan", "dense_tabular_gan"}:
-        allowed = {"seed", "latent_dim", "epochs", "batch_size", "learning_rate", "beta_1", "verbose_every", "metrics_every"}
+        allowed = {
+            "seed",
+            "latent_dim",
+            "epochs",
+            "batch_size",
+            "learning_rate",
+            "generator_learning_rate",
+            "discriminator_learning_rate",
+            "beta_1",
+            "verbose_every",
+            "metrics_every",
+            "generator_hidden_dims",
+            "discriminator_hidden_dims",
+            "discriminator_dropout",
+            "generator_batch_norm",
+            "label_smoothing",
+            "discriminator_steps",
+        }
         _reject_unknown(config, allowed, "models.simple_gan")
         for key in ["latent_dim", "epochs", "batch_size"]:
             _require_positive_int(config, key, "models.simple_gan")
@@ -205,12 +225,41 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
             _require_non_negative_int(config, key, "models.simple_gan")
         if float(config["learning_rate"]) <= 0:
             raise ConfigurationError("models.simple_gan.learning_rate must be greater than zero.")
+        for key in ["generator_learning_rate", "discriminator_learning_rate"]:
+            if config.get(key) is not None and float(config[key]) <= 0:
+                raise ConfigurationError(f"models.simple_gan.{key} must be greater than zero.")
         beta_1 = float(config["beta_1"])
         if not 0 <= beta_1 < 1:
             raise ConfigurationError("models.simple_gan.beta_1 must be in [0, 1).")
+        if not 0 <= float(config.get("discriminator_dropout", 0.0)) < 1:
+            raise ConfigurationError("models.simple_gan.discriminator_dropout must be in [0, 1).")
+        if not 0 <= float(config.get("label_smoothing", 0.0)) < 1:
+            raise ConfigurationError("models.simple_gan.label_smoothing must be in [0, 1).")
+        if "discriminator_steps" in config:
+            _require_positive_int(config, "discriminator_steps", "models.simple_gan")
+        if "generator_batch_norm" in config:
+            _require_bool(config, "generator_batch_norm", "models.simple_gan")
         return
     if normalized in {"ctgan", "ctgan_synthesizer"}:
-        allowed = {"seed", "epochs", "batch_size", "verbose", "enable_gpu", "cuda", "library"}
+        allowed = {
+            "seed",
+            "epochs",
+            "batch_size",
+            "verbose",
+            "enable_gpu",
+            "cuda",
+            "library",
+            "embedding_dim",
+            "generator_dim",
+            "discriminator_dim",
+            "generator_lr",
+            "discriminator_lr",
+            "generator_decay",
+            "discriminator_decay",
+            "discriminator_steps",
+            "log_frequency",
+            "pac",
+        }
         _reject_unknown(config, allowed, "models.ctgan")
         for key in ["epochs", "batch_size"]:
             _require_positive_int(config, key, "models.ctgan")
@@ -222,6 +271,12 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
             raise ConfigurationError("models.ctgan.cuda must be true, false, or null.")
         if "library" in config and not isinstance(config["library"], dict):
             raise ConfigurationError("models.ctgan.library must be a mapping when provided.")
+        for key in ["embedding_dim", "discriminator_steps", "pac"]:
+            if config.get(key) is not None:
+                _require_positive_int(config, key, "models.ctgan")
+        for key in ["generator_lr", "discriminator_lr", "generator_decay", "discriminator_decay"]:
+            if config.get(key) is not None and float(config[key]) < 0:
+                raise ConfigurationError(f"models.ctgan.{key} must be non-negative.")
         return
     raise ConfigurationError(f"Unknown model configuration: {model_name}")
 
@@ -235,7 +290,24 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
         if model_name == "programmatic":
             _reject_unknown(model_config, {"seed"}, f"{context}.programmatic")
         elif model_name == "simple_gan":
-            allowed = {"seed", "latent_dim", "epochs", "batch_size", "learning_rate", "beta_1", "verbose_every", "metrics_every"}
+            allowed = {
+                "seed",
+                "latent_dim",
+                "epochs",
+                "batch_size",
+                "learning_rate",
+                "generator_learning_rate",
+                "discriminator_learning_rate",
+                "beta_1",
+                "verbose_every",
+                "metrics_every",
+                "generator_hidden_dims",
+                "discriminator_hidden_dims",
+                "discriminator_dropout",
+                "generator_batch_norm",
+                "label_smoothing",
+                "discriminator_steps",
+            }
             _reject_unknown(model_config, allowed, f"{context}.simple_gan")
             for key in ["seed", "latent_dim", "epochs", "batch_size", "verbose_every", "metrics_every"]:
                 if key in model_config:
@@ -244,12 +316,41 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
                         raise ConfigurationError(f"{context}.simple_gan.{key} must be greater than zero.")
             if "learning_rate" in model_config and float(model_config["learning_rate"]) <= 0:
                 raise ConfigurationError(f"{context}.simple_gan.learning_rate must be greater than zero.")
+            for key in ["generator_learning_rate", "discriminator_learning_rate"]:
+                if model_config.get(key) is not None and float(model_config[key]) <= 0:
+                    raise ConfigurationError(f"{context}.simple_gan.{key} must be greater than zero.")
             if "beta_1" in model_config:
                 beta_1 = float(model_config["beta_1"])
                 if not 0 <= beta_1 < 1:
                     raise ConfigurationError(f"{context}.simple_gan.beta_1 must be in [0, 1).")
+            if "discriminator_dropout" in model_config and not 0 <= float(model_config["discriminator_dropout"]) < 1:
+                raise ConfigurationError(f"{context}.simple_gan.discriminator_dropout must be in [0, 1).")
+            if "label_smoothing" in model_config and not 0 <= float(model_config["label_smoothing"]) < 1:
+                raise ConfigurationError(f"{context}.simple_gan.label_smoothing must be in [0, 1).")
+            if "discriminator_steps" in model_config:
+                _require_positive_int(model_config, "discriminator_steps", f"{context}.simple_gan")
+            if "generator_batch_norm" in model_config:
+                _require_bool(model_config, "generator_batch_norm", f"{context}.simple_gan")
         elif model_name == "ctgan":
-            allowed = {"seed", "epochs", "batch_size", "verbose", "enable_gpu", "cuda", "library"}
+            allowed = {
+                "seed",
+                "epochs",
+                "batch_size",
+                "verbose",
+                "enable_gpu",
+                "cuda",
+                "library",
+                "embedding_dim",
+                "generator_dim",
+                "discriminator_dim",
+                "generator_lr",
+                "discriminator_lr",
+                "generator_decay",
+                "discriminator_decay",
+                "discriminator_steps",
+                "log_frequency",
+                "pac",
+            }
             _reject_unknown(model_config, allowed, f"{context}.ctgan")
             for key in ["seed", "epochs", "batch_size"]:
                 if key in model_config:
@@ -263,6 +364,12 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
                 raise ConfigurationError(f"{context}.ctgan.cuda must be true, false, or null.")
             if "library" in model_config and not isinstance(model_config["library"], dict):
                 raise ConfigurationError(f"{context}.ctgan.library must be a mapping when provided.")
+            for key in ["embedding_dim", "discriminator_steps", "pac"]:
+                if model_config.get(key) is not None:
+                    _require_positive_int(model_config, key, f"{context}.ctgan")
+            for key in ["generator_lr", "discriminator_lr", "generator_decay", "discriminator_decay"]:
+                if model_config.get(key) is not None and float(model_config[key]) < 0:
+                    raise ConfigurationError(f"{context}.ctgan.{key} must be non-negative.")
 
 
 def validate_benchmark_config(config: ConfigDict) -> None:
@@ -306,8 +413,8 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     )
     if not isinstance(benchmark.get("name"), str) or not benchmark["name"]:
         raise ConfigurationError("benchmark.name must be a non-empty string.")
-    if benchmark.get("type", "quality") not in {"quality", "capacity", "vocabulary_quality"}:
-        raise ConfigurationError("benchmark.type must be quality, capacity, or vocabulary_quality.")
+    if benchmark.get("type", "quality") not in {"quality", "capacity", "vocabulary_quality", "income_realism"}:
+        raise ConfigurationError("benchmark.type must be quality, capacity, vocabulary_quality, or income_realism.")
     models = benchmark.get("models")
     if not isinstance(models, list) or not models:
         raise ConfigurationError("benchmark.models must be a non-empty list.")
@@ -386,13 +493,19 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     evaluation = config.get("evaluation", {})
     if not isinstance(evaluation, dict):
         raise ConfigurationError("evaluation must be a mapping when provided.")
-    _reject_unknown(evaluation, {"privacy"}, "evaluation")
+    _reject_unknown(evaluation, {"privacy", "income_realism"}, "evaluation")
     privacy = evaluation.get("privacy", {})
     if not isinstance(privacy, dict):
         raise ConfigurationError("evaluation.privacy must be a mapping when provided.")
     _reject_unknown(privacy, {"max_nearest_neighbor_rows", "exclude_columns"}, "evaluation.privacy")
     if "max_nearest_neighbor_rows" in privacy:
         _require_positive_int(privacy, "max_nearest_neighbor_rows", "evaluation.privacy")
+    income_realism = evaluation.get("income_realism", {})
+    if not isinstance(income_realism, dict):
+        raise ConfigurationError("evaluation.income_realism must be a mapping when provided.")
+    _reject_unknown(income_realism, {"minimum_group_rows"}, "evaluation.income_realism")
+    if "minimum_group_rows" in income_realism:
+        _require_positive_int(income_realism, "minimum_group_rows", "evaluation.income_realism")
 
     quality_gates = {"assessment_mode": benchmark.get("assessment_mode", "experimental"), **config.get("quality_gates", {})}
     if not isinstance(config.get("quality_gates", {}), dict):
@@ -523,13 +636,19 @@ def validate_pipeline_config(config: ConfigDict) -> None:
     evaluation = config.get("evaluation", {})
     if not isinstance(evaluation, dict):
         raise ConfigurationError("pipeline.evaluation must be a mapping when provided.")
-    _reject_unknown(evaluation, {"privacy"}, "evaluation")
+    _reject_unknown(evaluation, {"privacy", "income_realism"}, "evaluation")
     privacy = evaluation.get("privacy", {})
     if not isinstance(privacy, dict):
         raise ConfigurationError("evaluation.privacy must be a mapping when provided.")
     _reject_unknown(privacy, {"max_nearest_neighbor_rows", "exclude_columns"}, "evaluation.privacy")
     if "max_nearest_neighbor_rows" in privacy:
         _require_positive_int(privacy, "max_nearest_neighbor_rows", "evaluation.privacy")
+    income_realism = evaluation.get("income_realism", {})
+    if not isinstance(income_realism, dict):
+        raise ConfigurationError("evaluation.income_realism must be a mapping when provided.")
+    _reject_unknown(income_realism, {"minimum_group_rows"}, "evaluation.income_realism")
+    if "minimum_group_rows" in income_realism:
+        _require_positive_int(income_realism, "minimum_group_rows", "evaluation.income_realism")
     validate_quality_gate_config(config["quality_gates"], "quality_gates")
     validate_export_config(config["export"], "export")
     models = config.get("models")

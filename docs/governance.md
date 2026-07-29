@@ -125,3 +125,10 @@ A página `Governança` não exibe mais a seção visual `Modelos e versões`. E
 ## Conteúdo regulatório
 
 O conteúdo regulatório detalhado permanece documentado em `docs/compliance.md`. A página `Governança` da interface foi simplificada e não exibe matriz regulatória ou seção separada de conformidade.
+## Diversidade, memorização e realismo condicional na interface
+
+A página `Governança` apresenta os cards `Diversidade e Memorização` e `Realismo Condicional` quando existem métricas em `evaluation.json`. Execuções antigas exibem `Não avaliado`, sem converter ausência de dado em zero.
+
+As fontes exibidas incluem `evaluation.json → privacy`, `evaluation.json → conditional_income`, `quality_gates.json` e `manifest.json`. A interface não carrega datasets completos para montar o histórico.
+
+Correspondência exata com treino é um indicador de possível memorização, mas não constitui prova definitiva de vazamento. Correspondência com holdout ajuda a interpretar coincidências inerentes à distribuição.

@@ -32,9 +32,17 @@ DEFAULT_SIMPLE_GAN_CONFIG: ConfigDict = {
     "epochs": 100,
     "batch_size": 64,
     "learning_rate": 0.0001,
+    "generator_learning_rate": None,
+    "discriminator_learning_rate": None,
     "beta_1": 0.5,
     "verbose_every": 10,
     "metrics_every": 10,
+    "generator_hidden_dims": None,
+    "discriminator_hidden_dims": None,
+    "discriminator_dropout": 0.0,
+    "generator_batch_norm": False,
+    "label_smoothing": 0.0,
+    "discriminator_steps": 1,
 }
 
 
@@ -60,18 +68,29 @@ class SimpleTabularGAN:
         self.preprocessor = DataPreprocessor(metadata=metadata)
         encoded = self.preprocessor.fit_transform(data[metadata.model_columns])
         latent_dim = int(self.config["latent_dim"])
-        self.generator = build_generator(latent_dim, self.preprocessor.output_dim)
-        self.discriminator = build_discriminator(self.preprocessor.output_dim)
+        generator_learning_rate = float(self.config.get("generator_learning_rate") or self.config["learning_rate"])
+        discriminator_learning_rate = float(self.config.get("discriminator_learning_rate") or self.config["learning_rate"])
+        self.generator = build_generator(
+            latent_dim,
+            self.preprocessor.output_dim,
+            hidden_dims=self.config.get("generator_hidden_dims"),
+            batch_normalization=bool(self.config.get("generator_batch_norm", False)),
+        )
+        self.discriminator = build_discriminator(
+            self.preprocessor.output_dim,
+            hidden_dims=self.config.get("discriminator_hidden_dims"),
+            dropout=float(self.config.get("discriminator_dropout", 0.0)),
+        )
         self.discriminator.compile(
             loss="binary_crossentropy",
-            optimizer=Adam(learning_rate=float(self.config["learning_rate"]), beta_1=float(self.config["beta_1"])),
+            optimizer=Adam(learning_rate=discriminator_learning_rate, beta_1=float(self.config["beta_1"])),
             metrics=["accuracy"],
         )
         self.gan = build_gan(
             self.generator,
             self.discriminator,
             latent_dim,
-            learning_rate=float(self.config["learning_rate"]),
+            learning_rate=generator_learning_rate,
             beta_1=float(self.config["beta_1"]),
         )
 
@@ -95,6 +114,8 @@ class SimpleTabularGAN:
             seed=int(self.config["seed"]),
             metrics_every=int(self.config["metrics_every"]),
             sample_metric_fn=sample_metrics,
+            label_smoothing=float(self.config.get("label_smoothing", 0.0)),
+            discriminator_steps=int(self.config.get("discriminator_steps", 1)),
         )
         self.training_history["config"] = self.config
 

@@ -934,6 +934,18 @@ class BenchmarkTest(unittest.TestCase):
         self.assertIn("Encerramento da busca de capacidade do sintetizador programático", document)
         self.assertIn("12.800.000 registros", document)
 
+    def test_income_realism_configs_validate_without_heavy_execution(self) -> None:
+        baseline = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-income-realism-baseline.yaml"))
+        smoke = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-income-realism-v2-smoke.yaml"))
+        main = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-income-realism-v2.yaml"))
+
+        self.assertEqual(baseline["benchmark"]["type"], "income_realism")
+        self.assertEqual(baseline["calibration"]["income_model_version"], 1)
+        self.assertEqual(smoke["calibration"]["income_model_version"], 2)
+        self.assertEqual(main["calibration"]["income_model_version"], 2)
+        self.assertEqual(len(benchmark_matrix(smoke)), 3)
+        self.assertEqual(len(benchmark_matrix(main)), 9)
+
     @unittest.skipUnless(os.environ.get("RUN_SLOW_MODEL_TESTS") == "1", "slow optional benchmark test")
     def test_real_three_model_smoke_benchmark(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

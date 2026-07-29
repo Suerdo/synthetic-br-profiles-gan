@@ -143,3 +143,8 @@ Esses campos distinguem a versão do vocabulário da versão do schema.
 ## Codificação
 
 Arquivos CSV gerados pelo serviço de geração usam `utf-8-sig` e separador `;`. JSON usa UTF-8 com `ensure_ascii=False`. Parquet preserva Unicode por meio do backend tabular.
+## Relação com o modelo de renda
+
+A versão do vocabulário categórico continua sendo `2`. O refinamento de renda usa uma versão separada, `income_model_version`, para registrar mudanças na calibração condicional sem alterar os nomes das colunas nem as categorias canônicas.
+
+Modelos neurais treinados antes do refinamento continuam compatíveis, mas seus manifestos podem indicar versão de renda anterior. Para aprender a distribuição associada ao modelo de renda novo, CTGAN e GAN simples precisam ser treinadas novamente com a nova calibração.

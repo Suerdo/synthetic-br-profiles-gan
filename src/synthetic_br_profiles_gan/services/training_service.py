@@ -24,6 +24,7 @@ from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 from synthetic_br_profiles_gan.localization import (
     CATEGORICAL_VOCABULARY_VERSION,
     DATA_LOCALE,
+    INCOME_MODEL_VERSION,
     UNICODE_NORMALIZATION,
 )
 from synthetic_br_profiles_gan.pipeline import DEFAULT_PIPELINE_CONFIG, train_synthesizer
@@ -168,6 +169,7 @@ def build_training_manifest(
         "data_locale": DATA_LOCALE,
         "unicode_normalization": UNICODE_NORMALIZATION,
         "categorical_vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
+        "income_model_version": _income_model_version_from_config(config),
         "seed": int(seed),
         "training_required": bool(training_required),
         "train_rows": int(train_rows),
@@ -286,3 +288,11 @@ def _gpu_available(env: dict[str, Any]) -> bool:
     tensorflow_gpu = gpu.get("tensorflow")
     torch_cuda = gpu.get("torch_cuda_available")
     return bool((isinstance(tensorflow_gpu, list) and tensorflow_gpu) or torch_cuda is True)
+
+
+def _income_model_version_from_config(config: dict[str, Any]) -> int:
+    try:
+        calibration = config.get("calibration", {})
+        return int(calibration.get("income_model_version", INCOME_MODEL_VERSION))
+    except (AttributeError, TypeError, ValueError):
+        return INCOME_MODEL_VERSION

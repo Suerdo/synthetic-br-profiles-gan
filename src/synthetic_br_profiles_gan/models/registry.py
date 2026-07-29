@@ -15,6 +15,7 @@ from synthetic_br_profiles_gan.exceptions import ModelSerializationError
 from synthetic_br_profiles_gan.localization import (
     CATEGORICAL_VOCABULARY_VERSION,
     DATA_LOCALE,
+    INCOME_MODEL_VERSION,
     UNICODE_NORMALIZATION,
 )
 from synthetic_br_profiles_gan.metadata import default_metadata
@@ -63,6 +64,8 @@ class SavedModelArtifact:
     data_locale: str | None
     unicode_normalization: str | None
     categorical_vocabulary_version: int
+    income_model_version: int
+    is_legacy_income_model: bool
     purpose: str
     approval_status: str
     is_legacy_vocabulary: bool
@@ -120,6 +123,7 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
         except ModelSerializationError:
             continue
         vocabulary_version = _optional_int(manifest.get("categorical_vocabulary_version")) or 1
+        income_model_version = _optional_int(manifest.get("income_model_version")) or 1
         artifacts.append(
             SavedModelArtifact(
                 model=artifact_model,
@@ -134,6 +138,8 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
                 data_locale=manifest.get("data_locale") or DATA_LOCALE,
                 unicode_normalization=manifest.get("unicode_normalization") or UNICODE_NORMALIZATION,
                 categorical_vocabulary_version=vocabulary_version,
+                income_model_version=income_model_version,
+                is_legacy_income_model=bool(income_model_version < INCOME_MODEL_VERSION),
                 purpose=_artifact_purpose(manifest, artifact_path),
                 approval_status=_artifact_approval_status(manifest, artifact_path),
                 is_legacy_vocabulary=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),

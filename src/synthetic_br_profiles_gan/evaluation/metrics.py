@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from synthetic_br_profiles_gan.evaluation.income import conditional_income_report
 from synthetic_br_profiles_gan.evaluation.privacy import privacy_metrics
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 
@@ -212,6 +213,7 @@ def evaluate_synthetic_data(
     holdout: pd.DataFrame,
     metadata: DatasetMetadata | None = None,
     max_nearest_neighbor_rows: int = 1000,
+    minimum_income_group_rows: int = 30,
 ) -> dict[str, Any]:
     """Compara dados sintéticos com os splits de treino e holdout."""
     metadata = metadata or default_metadata()
@@ -220,6 +222,11 @@ def evaluate_synthetic_data(
         "against_train": evaluate_against_reference(train, synthetic_model, metadata),
         "against_holdout": evaluate_against_reference(holdout, synthetic_model, metadata),
         "privacy": privacy_metrics(synthetic_model, train, holdout, metadata, max_nearest_neighbor_rows=max_nearest_neighbor_rows),
+        "conditional_income": conditional_income_report(
+            holdout,
+            synthetic_model,
+            minimum_group_rows=minimum_income_group_rows,
+        ),
         "row_counts": {
             "synthetic": int(len(synthetic_model)),
             "train": int(len(train)),

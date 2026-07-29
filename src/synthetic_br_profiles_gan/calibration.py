@@ -18,11 +18,12 @@ from synthetic_br_profiles_gan.domain.brazil import (
 )
 from synthetic_br_profiles_gan.domain.occupations import (
     OCCUPATION_CATALOG,
+    get_occupation_profile,
     income_multiplier_for_occupation,
     income_variability_for_occupation,
     occupation_sampling_weights,
 )
-from synthetic_br_profiles_gan.localization import normalize_text_frame
+from synthetic_br_profiles_gan.localization import INCOME_MODEL_VERSION, normalize_text_frame
 from synthetic_br_profiles_gan.metadata import (
     EDUCATION_CATEGORIES,
     GENDER_CATEGORIES,
@@ -39,6 +40,7 @@ DEFAULT_CALIBRATION_CONFIG: ConfigDict = {
     "num_rows": 20000,
     "holdout_fraction": 0.2,
     "income": {"min": 800.0, "max": 50000.0},
+    "income_model_version": INCOME_MODEL_VERSION,
     "age": {"min": 18, "max": 85},
     "region_weights": {
         "Norte": 0.09,
@@ -147,6 +149,21 @@ def _sample_income(
     region: str,
     minimum: float,
     maximum: float,
+    income_model_version: int = INCOME_MODEL_VERSION,
+) -> float:
+    if int(income_model_version) <= 1:
+        return _sample_income_v1(rng, age, education, occupation, region, minimum, maximum)
+    return _sample_income_v2(rng, age, education, occupation, region, minimum, maximum)
+
+
+def _sample_income_v1(
+    rng: np.random.Generator,
+    age: int,
+    education: str,
+    occupation: str,
+    region: str,
+    minimum: float,
+    maximum: float,
 ) -> float:
     age_curve = 0.72 + min(age, 58) / 58
     if age >= 67:
@@ -161,6 +178,45 @@ def _sample_income(
         * income_multiplier_for_occupation(occupation)
         * REGION_INCOME_MULTIPLIER[region]
         * mixture_boost
+    )
+    return round(float(np.clip(income, minimum, maximum)), 2)
+
+
+def _sample_income_v2(
+    rng: np.random.Generator,
+    age: int,
+    education: str,
+    occupation: str,
+    region: str,
+    minimum: float,
+    maximum: float,
+) -> float:
+    profile = get_occupation_profile(occupation)
+    variability = income_variability_for_occupation(occupation)
+    base = float(
+        rng.lognormal(
+            mean=math.log(2050 * float(profile.income_location_factor)),
+            sigma=float(profile.income_sigma) * variability,
+        )
+    )
+    education_multiplier = EDUCATION_INCOME_MULTIPLIER[education]
+    education_effect = 1.0 + (education_multiplier - 1.0) * float(profile.education_effect_strength)
+    experience_denominator = max(38, 65 - int(profile.minimum_age))
+    experience = np.clip((int(age) - int(profile.minimum_age)) / experience_denominator, 0.0, 1.0)
+    experience_effect = 0.86 + float(experience) * float(profile.experience_effect_strength)
+    if int(age) >= 67:
+        experience_effect *= 0.92
+    region_effect = 1.0 + (REGION_INCOME_MULTIPLIER[region] - 1.0) * 0.72
+    tail = 1.0
+    if rng.random() < float(profile.high_tail_probability):
+        tail = float(rng.lognormal(mean=0.0, sigma=float(profile.high_tail_scale) * variability))
+    income = (
+        base
+        * income_multiplier_for_occupation(occupation)
+        * education_effect
+        * experience_effect
+        * region_effect
+        * tail
     )
     return round(float(np.clip(income, minimum, maximum)), 2)
 
@@ -180,6 +236,7 @@ def generate_calibration_dataset(
     rng = np.random.default_rng(seed)
     income_min = float(effective["income"]["min"])
     income_max = float(effective["income"]["max"])
+    income_model_version = int(effective.get("income_model_version", INCOME_MODEL_VERSION))
     min_age = int(effective["age"]["min"])
     max_age = int(effective["age"]["max"])
     region_weights = effective["region_weights"]
@@ -198,7 +255,7 @@ def generate_calibration_dataset(
         occupation = _sample_occupation(rng, age, education)
         marital_status = _sample_marital_status(rng, age)
         dependents = _sample_dependents(rng, age, marital_status)
-        income = _sample_income(rng, age, education, occupation, region, income_min, income_max)
+        income = _sample_income(rng, age, education, occupation, region, income_min, income_max, income_model_version)
         rows.append(
             {
                 "Idade": age,

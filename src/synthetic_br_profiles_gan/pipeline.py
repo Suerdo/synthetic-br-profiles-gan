@@ -88,7 +88,10 @@ DEFAULT_PIPELINE_CONFIG: ConfigDict = {
         "privacy": {
             "max_nearest_neighbor_rows": 1000,
             "exclude_columns": ["Nome", "Data_Nascimento", "CPF", "CNH", "RG", "Titulo_Eleitor", "Telefone"],
-        }
+        },
+        "income_realism": {
+            "minimum_group_rows": 30,
+        },
     },
     "quality_gates": DEFAULT_QUALITY_GATES,
     "export": {"xlsx": True, "primary_format": "parquet"},
@@ -341,6 +344,7 @@ def run_pipeline_on_splits(
         holdout,
         metadata,
         max_nearest_neighbor_rows=int(effective.get("evaluation", {}).get("privacy", {}).get("max_nearest_neighbor_rows", 1000)),
+        minimum_income_group_rows=int(effective.get("evaluation", {}).get("income_realism", {}).get("minimum_group_rows", 30)),
     )
     stage_durations["evaluation_seconds"] = float(time.perf_counter() - stage_started)
     stage_started = time.perf_counter()
@@ -353,6 +357,59 @@ def run_pipeline_on_splits(
     artifact_paths = export_dataset(dataset, paths.status_dir, export_xlsx=bool(effective["export"].get("xlsx", True)))
     validation_path = write_json(validation, paths.status_dir / "validation.json")
     evaluation_path = write_json(evaluation, paths.status_dir / "evaluation.json")
+    privacy = evaluation.get("privacy", {})
+    conditional_income = evaluation.get("conditional_income", {})
+    memorization_path = write_json(
+        {
+            "columns_used": privacy.get("columns_used", []),
+            "duplicate_base_rows": privacy.get("duplicate_base_rows"),
+            "exact_matches": privacy.get("exact_matches"),
+            "partial_matches": privacy.get("partial_matches"),
+            "nearest_neighbor_train": privacy.get("nearest_neighbor_train"),
+            "nearest_neighbor_holdout": privacy.get("nearest_neighbor_holdout"),
+            "interpretation": (
+                "Indicadores de diversidade e memorização calculados nas colunas-base. "
+                "Identificadores derivados são excluídos da análise."
+            ),
+        },
+        paths.status_dir / "memorization_metrics.json",
+    )
+    duplicate_base_rows_path = write_json(
+        {
+            "columns_used": privacy.get("columns_used", []),
+            "summary": privacy.get("duplicate_base_rows", {}),
+            "largest_groups": (privacy.get("duplicate_base_rows") or {}).get("largest_groups", []),
+        },
+        paths.status_dir / "duplicate_base_rows.json",
+    )
+    exact_train_matches_path = write_json(
+        privacy.get("exact_matches", {}).get("train", {}),
+        paths.status_dir / "exact_train_matches.json",
+    )
+    exact_holdout_matches_path = write_json(
+        privacy.get("exact_matches", {}).get("holdout", {}),
+        paths.status_dir / "exact_holdout_matches.json",
+    )
+    income_summary_rows = conditional_income.get("summary_rows", []) if isinstance(conditional_income, dict) else []
+    income_comparison_rows = conditional_income.get("comparison_rows", []) if isinstance(conditional_income, dict) else []
+    income_tail_rows = conditional_income.get("tail_events", []) if isinstance(conditional_income, dict) else []
+    income_summary_csv = paths.status_dir / "conditional_income_summary.csv"
+    income_summary_parquet = paths.status_dir / "conditional_income_summary.parquet"
+    income_comparison_csv = paths.status_dir / "conditional_income_comparison.csv"
+    income_tail_csv = paths.status_dir / "conditional_income_tail_events.csv"
+    pd.DataFrame(income_summary_rows).to_csv(income_summary_csv, index=False, encoding="utf-8-sig")
+    pd.DataFrame(income_summary_rows).to_parquet(income_summary_parquet, index=False)
+    pd.DataFrame(income_comparison_rows).to_csv(income_comparison_csv, index=False, encoding="utf-8-sig")
+    pd.DataFrame(income_tail_rows).to_csv(income_tail_csv, index=False, encoding="utf-8-sig")
+    income_plausibility_path = write_json(
+        {
+            "summary": conditional_income.get("summary", {}) if isinstance(conditional_income, dict) else {},
+            "minimum_group_rows": conditional_income.get("minimum_group_rows") if isinstance(conditional_income, dict) else None,
+            "groupings": conditional_income.get("groupings", {}) if isinstance(conditional_income, dict) else {},
+            "interpretation": conditional_income.get("interpretation") if isinstance(conditional_income, dict) else None,
+        },
+        paths.status_dir / "income_plausibility_summary.json",
+    )
     gates_payload = {
         "status": gates.status,
         "failures": gates.failures,
@@ -380,6 +437,15 @@ def run_pipeline_on_splits(
         **artifact_paths,
         "validation": validation_path,
         "evaluation": evaluation_path,
+        "memorization_metrics": memorization_path,
+        "duplicate_base_rows": duplicate_base_rows_path,
+        "exact_train_matches": exact_train_matches_path,
+        "exact_holdout_matches": exact_holdout_matches_path,
+        "conditional_income_summary_csv": income_summary_csv,
+        "conditional_income_summary_parquet": income_summary_parquet,
+        "conditional_income_comparison_csv": income_comparison_csv,
+        "conditional_income_tail_events_csv": income_tail_csv,
+        "income_plausibility_summary": income_plausibility_path,
         "quality_gates": gates_path,
         "generation": generation_path,
         "config": config_path,
@@ -401,6 +467,7 @@ def run_pipeline_on_splits(
         root=Path.cwd(),
     )
     manifest["seed_state"] = seed_state_to_dict(seed_state)
+    manifest["income_model_version"] = int(effective.get("calibration", {}).get("income_model_version", 1))
     manifest["generation_accounting"] = generation_accounting
     manifest["quality_gate_failures"] = gates.failures
     manifest["stage_durations_seconds"] = stage_durations

@@ -24,33 +24,37 @@ def _require_tensorflow():
     return Sequential, layers, Adam
 
 
-def build_generator(latent_dim: int, output_dim: int):
+def build_generator(
+    latent_dim: int,
+    output_dim: int,
+    hidden_dims: list[int] | tuple[int, ...] | None = None,
+    batch_normalization: bool = False,
+):
     """Cria o gerador denso usado pelo baseline original do notebook."""
     Sequential, layers, _ = _require_tensorflow()
-    return Sequential(
-        [
-            layers.Input(shape=(latent_dim,)),
-            layers.Dense(128, activation="relu"),
-            layers.Dense(256, activation="relu"),
-            layers.Dense(256, activation="relu"),
-            layers.Dense(output_dim, activation="sigmoid"),
-        ],
-        name="simple_tabular_generator",
-    )
+    model_layers = [layers.Input(shape=(latent_dim,))]
+    for dim in list(hidden_dims or [128, 256, 256]):
+        model_layers.append(layers.Dense(int(dim), activation="relu"))
+        if batch_normalization:
+            model_layers.append(layers.BatchNormalization())
+    model_layers.append(layers.Dense(output_dim, activation="sigmoid"))
+    return Sequential(model_layers, name="simple_tabular_generator")
 
 
-def build_discriminator(input_dim: int):
+def build_discriminator(
+    input_dim: int,
+    hidden_dims: list[int] | tuple[int, ...] | None = None,
+    dropout: float = 0.0,
+):
     """Cria o discriminador binário para linhas tabulares codificadas."""
     Sequential, layers, _ = _require_tensorflow()
-    return Sequential(
-        [
-            layers.Input(shape=(input_dim,)),
-            layers.Dense(256, activation="relu"),
-            layers.Dense(128, activation="relu"),
-            layers.Dense(1, activation="sigmoid"),
-        ],
-        name="simple_tabular_discriminator",
-    )
+    model_layers = [layers.Input(shape=(input_dim,))]
+    for dim in list(hidden_dims or [256, 128]):
+        model_layers.append(layers.Dense(int(dim), activation="relu"))
+        if float(dropout) > 0:
+            model_layers.append(layers.Dropout(float(dropout)))
+    model_layers.append(layers.Dense(1, activation="sigmoid"))
+    return Sequential(model_layers, name="simple_tabular_discriminator")
 
 
 def build_gan(generator, discriminator, latent_dim: int, learning_rate: float = 0.0001, beta_1: float = 0.5):
@@ -87,14 +91,10 @@ def train_gan(
     seed: int | None = None,
     metrics_every: int = 10,
     sample_metric_fn: Callable[[np.ndarray], dict[str, float]] | None = None,
+    label_smoothing: float = 0.0,
+    discriminator_steps: int = 1,
 ) -> dict[str, Any]:
-    """Treina a GAN densa usando épocas reais sobre todos os batches.
-
-    A implementação anterior usava um batch aleatório por laço e chamava esse
-    laço de época. Esta rotina usa passagens embaralhadas pelo dataset completo
-    e registra contagens de batches, perdas, acurácia do discriminador, duração,
-    seed e diagnósticos opcionais de amostra fixa.
-    """
+    """Treina a GAN densa usando épocas reais sobre todos os batches."""
     if data.size == 0:
         raise ValueError("Training data cannot be empty.")
     rng = np.random.default_rng(seed)
@@ -105,6 +105,8 @@ def train_gan(
         "batches_per_epoch": int(np.ceil(data.shape[0] / batch_size)),
         "total_discriminator_updates": 0,
         "total_generator_updates": 0,
+        "label_smoothing": float(label_smoothing),
+        "discriminator_steps": int(discriminator_steps),
         "epochs_history": [],
     }
     fixed_noise = rng.normal(0, 1, (min(128, max(batch_size, 1)), latent_dim))
@@ -121,20 +123,21 @@ def train_gan(
             batch_indices = permutation[start : start + batch_size]
             real_samples = data[batch_indices]
             current_batch = real_samples.shape[0]
-            real_labels = np.ones((current_batch, 1), dtype=np.float32)
+            real_labels = np.full((current_batch, 1), 1.0 - float(label_smoothing), dtype=np.float32)
             fake_labels = np.zeros((current_batch, 1), dtype=np.float32)
 
-            noise = rng.normal(0, 1, (current_batch, latent_dim))
-            fake_samples = generator.predict(noise, verbose=0)
+            for _ in range(max(int(discriminator_steps), 1)):
+                noise = rng.normal(0, 1, (current_batch, latent_dim))
+                fake_samples = generator.predict(noise, verbose=0)
 
-            d_loss_real = discriminator.train_on_batch(real_samples, real_labels)
-            d_loss_fake = discriminator.train_on_batch(fake_samples, fake_labels)
-            history["total_discriminator_updates"] += 2
-            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-            discriminator_losses.append(_loss_as_float(d_loss))
-            accuracy = _accuracy_as_float(d_loss)
-            if accuracy is not None:
-                discriminator_accuracies.append(accuracy)
+                d_loss_real = discriminator.train_on_batch(real_samples, real_labels)
+                d_loss_fake = discriminator.train_on_batch(fake_samples, fake_labels)
+                history["total_discriminator_updates"] += 2
+                d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+                discriminator_losses.append(_loss_as_float(d_loss))
+                accuracy = _accuracy_as_float(d_loss)
+                if accuracy is not None:
+                    discriminator_accuracies.append(accuracy)
 
             discriminator.trainable = False
             noise = rng.normal(0, 1, (current_batch, latent_dim))

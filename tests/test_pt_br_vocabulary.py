@@ -36,6 +36,7 @@ from synthetic_br_profiles_gan.generators.demographics import criar_faker, final
 from synthetic_br_profiles_gan.localization import (
     CATEGORICAL_VOCABULARY_VERSION,
     DATA_LOCALE,
+    INCOME_MODEL_VERSION,
     LEGACY_CATEGORY_ALIASES,
     UNICODE_NORMALIZATION,
     normalize_text_value,
@@ -83,6 +84,7 @@ class PtBRVocabularyTest(unittest.TestCase):
         self.assertEqual(DATA_LOCALE, "pt-BR")
         self.assertEqual(UNICODE_NORMALIZATION, "NFC")
         self.assertEqual(CATEGORICAL_VOCABULARY_VERSION, 2)
+        self.assertEqual(INCOME_MODEL_VERSION, 2)
 
     def test_municipalities_are_accented_and_nfc(self) -> None:
         expected = {
@@ -217,6 +219,28 @@ class PtBRVocabularyTest(unittest.TestCase):
         self.assertGreater(income_multiplier_for_occupation("Médico"), income_multiplier_for_occupation("Atendente"))
         self.assertGreater(EDUCATION_INCOME_MULTIPLIER["Pós-graduação"], EDUCATION_INCOME_MULTIPLIER["Fundamental"])
 
+    def test_mechanic_high_income_is_possible_but_rare(self) -> None:
+        rng = np.random.default_rng(2026)
+        sample = np.asarray(
+            [
+                _sample_income(
+                    rng,
+                    age=48,
+                    education="Ensino Médio",
+                    occupation="Mecânico",
+                    region="Sudeste",
+                    minimum=800.0,
+                    maximum=50000.0,
+                )
+                for _ in range(3000)
+            ]
+        )
+        high_income_rate = float((sample > 10000.0).mean())
+        self.assertGreater(sample.max(), 10000.0)
+        self.assertLess(high_income_rate, 0.03)
+        self.assertLess(float(np.median(sample)), 6000.0)
+        self.assertGreater(float(np.quantile(sample, 0.99)), float(np.quantile(sample, 0.95)))
+
     def test_legacy_aliases_are_applied_before_validation(self) -> None:
         for old, new in LEGACY_CATEGORY_ALIASES.items():
             self.assertEqual(normalize_text_value(old), new)
@@ -296,6 +320,7 @@ class PtBRVocabularyTest(unittest.TestCase):
             self.assertEqual(manifest["data_locale"], "pt-BR")
             self.assertEqual(manifest["unicode_normalization"], "NFC")
             self.assertEqual(manifest["categorical_vocabulary_version"], 2)
+            self.assertEqual(manifest["income_model_version"], 2)
 
             output = root / "dataset.csv"
             output.write_text("x", encoding="utf-8")
@@ -320,6 +345,8 @@ class PtBRVocabularyTest(unittest.TestCase):
             )
             self.assertEqual(generated["source_model_vocabulary_version"], 1)
             self.assertEqual(generated["output_vocabulary_version"], 2)
+            self.assertEqual(generated["source_model_income_version"], 1)
+            self.assertEqual(generated["output_income_model_version"], 2)
             self.assertTrue(generated["legacy_value_normalization_applied"])
 
             legacy = root / "legacy-programmatic"
@@ -340,6 +367,8 @@ class PtBRVocabularyTest(unittest.TestCase):
             self.assertTrue(by_id["legacy-programmatic"].is_legacy_vocabulary)
             self.assertTrue(by_id["legacy-programmatic"].compatibility_normalization_required)
             self.assertEqual(by_id["legacy-programmatic"].categorical_vocabulary_version, 1)
+            self.assertEqual(by_id["legacy-programmatic"].income_model_version, 1)
+            self.assertTrue(by_id["legacy-programmatic"].is_legacy_income_model)
 
 
 if __name__ == "__main__":

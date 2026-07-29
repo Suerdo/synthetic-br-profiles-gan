@@ -16,6 +16,7 @@ DEFAULT_QUALITY_GATES: ConfigDict = {
     "duplicated_identifier_max": {"value": 0, "mandatory": True},
     "null_required_fields_max": {"value": 0, "mandatory": True},
     "exact_train_match_rate_max": {"value": 0.01, "mandatory": True},
+    "duplicate_base_row_rate_max": {"value": 0.01, "mandatory": False},
     "total_variation_distance_max": {"value": 0.25, "mandatory": False},
     "correlation_difference_max": {"value": 0.30, "mandatory": False},
 }
@@ -60,6 +61,14 @@ QUALITY_GATE_DOCUMENTATION: dict[str, dict[str, Any]] = {
         "limit": 0.01,
         "reason": "Taxa elevada de match exato pode indicar memorização.",
         "missing_behavior": "falha obrigatória",
+    },
+    "duplicate_base_row_rate_max": {
+        "metric": "evaluation.privacy.duplicate_base_rows.duplicate_row_rate",
+        "interpretation": "Duplicidade de combinações-base nas 11 colunas produzidas pelo modelo.",
+        "unit": "taxa",
+        "limit": 0.01,
+        "reason": "Limite informativo inicial para acompanhar baixa diversidade e possível colapso de modo.",
+        "missing_behavior": "não avaliado quando a métrica não existe",
     },
     "total_variation_distance_max": {
         "metric": "max holdout categorical total variation distance",
@@ -146,12 +155,20 @@ def evaluate_quality_gates(
         for key, value in reason_counts.items()
         if key.endswith("_duplicado") and key != "duplicated_rows"
     )
+    privacy = evaluation.get("privacy", {}) if isinstance(evaluation.get("privacy"), dict) else {}
+    duplicate_base = privacy.get("duplicate_base_rows") if isinstance(privacy.get("duplicate_base_rows"), dict) else {}
+    exact_matches = privacy.get("exact_matches") if isinstance(privacy.get("exact_matches"), dict) else {}
+    exact_train = exact_matches.get("train") if isinstance(exact_matches.get("train"), dict) else {}
     checked = {
         "synthetic_rows": evaluation.get("row_counts", {}).get("synthetic"),
         "invalid_rows": validation.get("invalid_rows"),
         "duplicated_identifier": float(duplicated_identifier_count),
         "null_required_fields": float(reason_counts.get("null_required_fields", 0)),
-        "exact_train_match_rate": evaluation.get("privacy", {}).get("exact_train_match_rate"),
+        "exact_train_match_rate": privacy.get("exact_train_match_rate"),
+        "exact_train_match_count": exact_train.get("exact_match_count"),
+        "duplicate_base_row_rate": duplicate_base.get("duplicate_row_rate") if duplicate_base else privacy.get("duplicate_row_rate"),
+        "duplicate_base_duplicated_occurrences": duplicate_base.get("duplicated_occurrences"),
+        "duplicate_base_duplicated_groups": duplicate_base.get("duplicated_groups"),
         "total_variation_distance": _max_tvd(evaluation),
         "correlation_difference": _correlation_difference(evaluation),
     }
@@ -160,6 +177,7 @@ def evaluate_quality_gates(
         "duplicated_identifier_max": ("duplicated_identifier", lambda current, limit: current <= limit),
         "null_required_fields_max": ("null_required_fields", lambda current, limit: current <= limit),
         "exact_train_match_rate_max": ("exact_train_match_rate", lambda current, limit: current <= limit),
+        "duplicate_base_row_rate_max": ("duplicate_base_row_rate", lambda current, limit: current <= limit),
         "total_variation_distance_max": ("total_variation_distance", lambda current, limit: current <= limit),
         "correlation_difference_max": ("correlation_difference", lambda current, limit: current <= limit),
     }
@@ -185,6 +203,8 @@ def evaluate_quality_gates(
         current = checked[metric_name]
         limit = float(spec["value"])
         if not _is_valid_metric(current):
+            if gate_name == "duplicate_base_row_rate_max" and not bool(spec["mandatory"]):
+                continue
             failures.append(
                 _metric_failure(
                     gate_name,

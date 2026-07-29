@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import inspect
 import json
 import pickle
 from pathlib import Path
@@ -24,6 +25,29 @@ DEFAULT_CTGAN_CONFIG: ConfigDict = {
     "verbose": False,
     "enable_gpu": False,
     "cuda": None,
+    "embedding_dim": None,
+    "generator_dim": None,
+    "discriminator_dim": None,
+    "generator_lr": None,
+    "discriminator_lr": None,
+    "generator_decay": None,
+    "discriminator_decay": None,
+    "discriminator_steps": None,
+    "log_frequency": None,
+    "pac": None,
+}
+
+CTGAN_OPTIONAL_KWARGS = {
+    "embedding_dim",
+    "generator_dim",
+    "discriminator_dim",
+    "generator_lr",
+    "discriminator_lr",
+    "generator_decay",
+    "discriminator_decay",
+    "discriminator_steps",
+    "log_frequency",
+    "pac",
 }
 
 
@@ -58,12 +82,7 @@ class CTGANSynthesizer:
         self.discrete_columns = metadata.categorical_columns(include_discrete_numeric=True)
         self.library_version = importlib.metadata.version("ctgan")
         train = coerce_model_dtypes(data[metadata.model_columns], metadata)
-        model_kwargs = {
-            "epochs": int(self.config["epochs"]),
-            "batch_size": int(self.config["batch_size"]),
-            "verbose": bool(self.config["verbose"]),
-            "enable_gpu": bool(self.config.get("enable_gpu", self.config.get("cuda", False))),
-        }
+        model_kwargs = _ctgan_constructor_kwargs(CTGAN, self.config)
         self.model = CTGAN(**model_kwargs)
         self.model.fit(train, self.discrete_columns)
 
@@ -108,3 +127,30 @@ class CTGANSynthesizer:
             return instance
         except Exception as exc:
             raise ModelSerializationError(f"Could not load CTGANSynthesizer from {input_path}: {exc}") from exc
+
+
+def _ctgan_constructor_kwargs(ctgan_class: Any, config: ConfigDict) -> dict[str, Any]:
+    """Monta kwargs compatíveis com a assinatura da versão instalada da CTGAN."""
+    signature = inspect.signature(ctgan_class)
+    supported = set(signature.parameters)
+    accepts_var_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+    batch_size = int(config["batch_size"])
+    pac = config.get("pac")
+    if pac is not None and (accepts_var_kwargs or "pac" in supported):
+        pac_int = int(pac)
+        if pac_int <= 0:
+            raise SyntheticModelError("ctgan.pac must be greater than zero.")
+        if batch_size % pac_int != 0:
+            raise SyntheticModelError("ctgan.batch_size must be divisible by ctgan.pac.")
+    kwargs = {
+        "epochs": int(config["epochs"]),
+        "batch_size": batch_size,
+        "verbose": bool(config["verbose"]),
+        "enable_gpu": bool(config.get("enable_gpu", config.get("cuda", False))),
+    }
+    for key in CTGAN_OPTIONAL_KWARGS:
+        if (accepts_var_kwargs or key in supported) and config.get(key) is not None:
+            kwargs[key] = config[key]
+    if accepts_var_kwargs:
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in supported}

@@ -156,3 +156,10 @@ A página foi simplificada para concentrar `Resumo Operacional`, `Qualidade dos 
 - A interface não executa benchmarks de capacidade.
 - Modelos neurais podem variar conforme backend, hardware e versões das bibliotecas.
 - A referência metodológica continua sendo a base de calibração sintética controlada.
+## Indicadores de diversidade e renda
+
+A interface apresenta métricas de duplicidade de combinações-base, correspondência exata com treino, correspondência exata com holdout e realismo condicional da renda na página `Governança`.
+
+Quando uma execução foi criada antes dessas métricas, o valor aparece como `Não avaliado`. Zero é exibido somente quando o artefato registra zero real.
+
+Esses indicadores usam as colunas-base do modelo e excluem identificadores derivados. Eles apoiam avaliação de risco e qualidade, mas não garantem anonimização nem conformidade regulatória.

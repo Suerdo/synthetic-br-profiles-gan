@@ -17,6 +17,7 @@ from synthetic_br_profiles_gan.exceptions import ConfigurationError, StructuralV
 from synthetic_br_profiles_gan.localization import (
     CATEGORICAL_VOCABULARY_VERSION,
     DATA_LOCALE,
+    INCOME_MODEL_VERSION,
     UNICODE_NORMALIZATION,
 )
 from synthetic_br_profiles_gan.manifest import environment_info, get_git_commit, write_json
@@ -212,6 +213,8 @@ def build_generation_manifest(
         "unicode_normalization": UNICODE_NORMALIZATION,
         "source_model_vocabulary_version": source_vocabulary_version,
         "output_vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
+        "source_model_income_version": _source_income_model_version(training_manifest),
+        "output_income_model_version": INCOME_MODEL_VERSION,
         "legacy_value_normalization_applied": bool(source_vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
         "model_artifact": model_artifact,
         "source_training_manifest": None if training_manifest is None else training_manifest.get("created_at_utc"),
@@ -292,6 +295,15 @@ def _source_vocabulary_version(training_manifest: dict[str, Any] | None) -> int:
         return CATEGORICAL_VOCABULARY_VERSION
     try:
         return int(training_manifest.get("categorical_vocabulary_version", 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _source_income_model_version(training_manifest: dict[str, Any] | None) -> int:
+    if training_manifest is None:
+        return INCOME_MODEL_VERSION
+    try:
+        return int(training_manifest.get("income_model_version", 1))
     except (TypeError, ValueError):
         return 1
 
