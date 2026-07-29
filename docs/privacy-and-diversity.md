@@ -36,3 +36,19 @@ O gate `exact_train_match_rate_max` permanece obrigatório com limite inicial de
 O novo gate `duplicate_base_row_rate_max` foi incluído como informativo, também com valor inicial de `0.01`. A ausência da métrica em execuções antigas é exibida como `Não avaliado`, não como zero.
 
 Esses limites são parâmetros exploratórios do projeto, não limiares científicos universais.
+
+## Avaliação raw e final
+
+Nos benchmarks recentes, as métricas de diversidade e memorização são persistidas antes e depois do pós-processamento:
+
+- `raw_evaluation.json`: avalia a amostra bruta das colunas-base geradas pelo sintetizador;
+- `final_evaluation.json`: avalia o dataset final exportável;
+- `raw_final_comparison.json`: resume validade bruta, validade final, reparos, rejeições e mudanças de distribuição.
+
+Essa separação evita atribuir ao modelo neural uma qualidade criada pelo pipeline. Correções de pós-processamento não são penalizadas automaticamente, mas sua participação fica explícita.
+
+## CTGAN candidate_c e renda v3
+
+A confirmação independente da CTGAN candidate_c com `income_model_version = 3` concluiu três seeds de confirmação sem duplicidade de combinações-base e sem correspondência exata com treino. Esses resultados apoiam a classificação `recommended_candidate`, mas não aprovam automaticamente o artefato nem garantem anonimização.
+
+As evidências continuam sanitizadas. Artefatos como `duplicate_base_rows.json`, `exact_train_matches.json` e `exact_holdout_matches.json` registram hashes, contagens e índices, sem expor nomes, CPF, telefone, documentos ou linhas completas.

@@ -424,6 +424,8 @@ Ao selecionar `ctgan` ou `simple_gan`, o artefato mais recente daquele modelo é
 
 A avaliação diferencia duplicidade de combinações-base, correspondência exata com treino, correspondência exata com holdout e realismo condicional da renda. Essas métricas usam as 11 colunas-base do modelo e excluem identificadores derivados como CPF, telefone e documentos.
 
+O refinamento `income_model_version = 3` ajusta apenas parâmetros sintéticos de dispersão e cauda da renda, sem alterar o vocabulário categórico versão 2 nem usar gênero no cálculo. A CTGAN candidate_c foi confirmada em seeds independentes `44`, `45` e `46` e gerou um artefato `recommended_candidate`, ainda sem status `approved`, `default` ou `production`.
+
 Consulte `docs/privacy-and-diversity.md` e `docs/income-realism.md` para a representação canônica, os artefatos, os quality gates e as limitações de interpretação.
 
 ## Testes

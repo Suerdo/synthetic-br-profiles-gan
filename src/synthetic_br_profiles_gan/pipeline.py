@@ -157,11 +157,13 @@ def generate_profiles(
     batch_size: int = 1024,
     max_batches: int = 20,
     date_format: str = "%Y-%m-%d",
-) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
+    return_raw: bool = False,
+) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]] | tuple[pd.DataFrame, dict[str, Any], dict[str, Any], dict[str, pd.DataFrame]]:
     """Gera perfis finais e contabiliza linhas aceitas, rejeitadas e excedentes."""
     fake = criar_faker(seed)
     rng = random.Random(seed)
     candidates: list[pd.DataFrame] = []
+    raw_candidates: list[pd.DataFrame] = []
     valid_masks: list[pd.Series] = []
     batch_lengths: list[int] = []
     attempts = 0
@@ -189,6 +191,7 @@ def generate_profiles(
         validation = validate_profile_dataframe(final, metadata=metadata, final=True, reference_date=reference_date)
         candidate_validation_seconds += time.perf_counter() - stage_started
         candidates.append(final)
+        raw_candidates.append(core.reset_index(drop=True))
         batch_lengths.append(int(len(final)))
         valid_masks.append(validation.valid_mask.reset_index(drop=True))
         accepted_so_far = int(pd.concat(valid_masks, ignore_index=True).sum())
@@ -206,6 +209,7 @@ def generate_profiles(
                 break
 
     all_candidates = pd.concat(candidates, ignore_index=True) if candidates else pd.DataFrame()
+    all_raw_candidates = pd.concat(raw_candidates, ignore_index=True) if raw_candidates else pd.DataFrame()
     all_masks = pd.concat(valid_masks, ignore_index=True) if valid_masks else pd.Series(dtype=bool)
     if full_validation is None or len(full_validation.valid_mask) != len(all_candidates):
         full_validation = validate_profile_dataframe(
@@ -242,6 +246,13 @@ def generate_profiles(
     selection.accounting["sampling_seconds"] = float(sampling_seconds)
     selection.accounting["postprocessing_seconds"] = float(postprocessing_seconds)
     selection.accounting["candidate_validation_seconds"] = float(candidate_validation_seconds)
+    if return_raw:
+        selected_indices = selection.accounting.get("selected_candidate_indices", [])
+        raw_selected = all_raw_candidates.loc[selected_indices].reset_index(drop=True) if selected_indices else pd.DataFrame()
+        return selection.selected, selection.accounting, full_validation.report, {
+            "all_candidates": all_raw_candidates,
+            "selected": raw_selected,
+        }
     return selection.selected, selection.accounting, full_validation.report
 
 
@@ -266,6 +277,74 @@ def _count_cross_batch_identifier_duplicates(candidates: pd.DataFrame, batch_len
             if len(batches) > 1:
                 duplicate_count += max(len(group) - 1, 0)
     return int(duplicate_count)
+
+
+def _validation_rate(report: dict[str, Any]) -> float:
+    rows = int(report.get("n_rows", 0) or 0)
+    if rows <= 0:
+        return 0.0
+    return float(int(report.get("valid_rows", 0) or 0) / rows)
+
+
+def _max_categorical_tvd(evaluation: dict[str, Any]) -> float | None:
+    categorical = evaluation.get("against_holdout", {}).get("categorical", {})
+    values = [
+        float(metrics["total_variation_distance"])
+        for metrics in categorical.values()
+        if isinstance(metrics, dict) and metrics.get("total_variation_distance") is not None
+    ]
+    return max(values) if values else None
+
+
+def _conditional_income_distance(evaluation: dict[str, Any]) -> float | None:
+    summary = evaluation.get("conditional_income", {}).get("summary", {})
+    value = summary.get("mean_conditional_income_wasserstein")
+    return None if value is None else float(value)
+
+
+def _raw_final_comparison(
+    raw_validation: dict[str, Any],
+    final_validation: dict[str, Any],
+    raw_evaluation: dict[str, Any],
+    final_evaluation: dict[str, Any],
+    generation_accounting: dict[str, Any],
+) -> dict[str, Any]:
+    raw_validity = _validation_rate(raw_validation)
+    final_validity = _validation_rate(final_validation)
+    raw_tvd = _max_categorical_tvd(raw_evaluation)
+    final_tvd = _max_categorical_tvd(final_evaluation)
+    raw_income = _conditional_income_distance(raw_evaluation)
+    final_income = _conditional_income_distance(final_evaluation)
+    total_candidates = int(generation_accounting.get("total_candidates", 0) or 0)
+    rejected = int(generation_accounting.get("rejected_by_global_rules", generation_accounting.get("rejected_by_rules", 0)) or 0)
+    return {
+        "raw_structural_validity_rate": raw_validity,
+        "final_structural_validity_rate": final_validity,
+        "postprocessing_repair_rate": float(max(final_validity - raw_validity, 0.0)),
+        "postprocessing_rejection_rate": float(0.0 if total_candidates <= 0 else rejected / total_candidates),
+        "categorical_tvd_raw": raw_tvd,
+        "categorical_tvd_final": final_tvd,
+        "conditional_income_distance_raw": raw_income,
+        "conditional_income_distance_final": final_income,
+        "raw_final_distribution_shift": (
+            None if raw_tvd is None or final_tvd is None else float(abs(float(final_tvd) - float(raw_tvd)))
+        ),
+        "raw_reason_counts": raw_validation.get("reason_counts", {}),
+        "final_reason_counts": final_validation.get("reason_counts", {}),
+        "generation_accounting": {
+            "total_candidates": total_candidates,
+            "accepted_by_batch_rules": generation_accounting.get("accepted_by_batch_rules"),
+            "accepted_by_global_rules": generation_accounting.get("accepted_by_global_rules"),
+            "rejected_by_global_rules": generation_accounting.get("rejected_by_global_rules"),
+            "selected": generation_accounting.get("selected"),
+            "batch_acceptance_rate": generation_accounting.get("batch_acceptance_rate"),
+            "global_acceptance_rate": generation_accounting.get("global_acceptance_rate"),
+        },
+        "interpretation": (
+            "Indicadores diagnósticos para distinguir a saída bruta do sintetizador do resultado "
+            "final pós-processado. Correções não são penalizadas automaticamente."
+        ),
+    }
 
 
 def run_pipeline_on_splits(
@@ -321,7 +400,7 @@ def run_pipeline_on_splits(
     if resource_probe is not None:
         stage_resources["memory_before_generation_mb"] = resource_probe()
     stage_started = time.perf_counter()
-    dataset, generation_accounting, candidate_validation = generate_profiles(
+    dataset, generation_accounting, candidate_validation, raw_generation = generate_profiles(
         synthesizer=synthesizer,
         n_target=requested_rows,
         metadata=metadata,
@@ -330,14 +409,27 @@ def run_pipeline_on_splits(
         batch_size=int(generation_config["batch_size"]),
         max_batches=int(generation_config["max_batches"]),
         date_format=str(generation_config["date_format"]),
+        return_raw=True,
     )
     stage_durations["generation_seconds"] = float(time.perf_counter() - stage_started)
     if resource_probe is not None:
         stage_resources["memory_after_generation_mb"] = resource_probe()
     stage_started = time.perf_counter()
     validation = validate_profile_dataframe(dataset, metadata=metadata, final=True, reference_date=reference_date).report
+    raw_selected = raw_generation.get("selected", pd.DataFrame())
+    raw_candidates = raw_generation.get("all_candidates", pd.DataFrame())
+    raw_selected_validation = validate_profile_dataframe(raw_selected, metadata=metadata, final=False, reference_date=reference_date).report
+    raw_candidate_validation = validate_profile_dataframe(raw_candidates, metadata=metadata, final=False, reference_date=reference_date).report
     stage_durations["validation_seconds"] = float(time.perf_counter() - stage_started)
     stage_started = time.perf_counter()
+    raw_evaluation = evaluate_synthetic_data(
+        raw_selected,
+        train,
+        holdout,
+        metadata,
+        max_nearest_neighbor_rows=int(effective.get("evaluation", {}).get("privacy", {}).get("max_nearest_neighbor_rows", 1000)),
+        minimum_income_group_rows=int(effective.get("evaluation", {}).get("income_realism", {}).get("minimum_group_rows", 30)),
+    )
     evaluation = evaluate_synthetic_data(
         dataset,
         train,
@@ -347,6 +439,13 @@ def run_pipeline_on_splits(
         minimum_income_group_rows=int(effective.get("evaluation", {}).get("income_realism", {}).get("minimum_group_rows", 30)),
     )
     stage_durations["evaluation_seconds"] = float(time.perf_counter() - stage_started)
+    raw_final_comparison = _raw_final_comparison(
+        raw_validation=raw_selected_validation,
+        final_validation=validation,
+        raw_evaluation=raw_evaluation,
+        final_evaluation=evaluation,
+        generation_accounting=generation_accounting,
+    )
     stage_started = time.perf_counter()
     gates = evaluate_quality_gates(validation, evaluation, effective["quality_gates"])
     stage_durations["quality_gates_seconds"] = float(time.perf_counter() - stage_started)
@@ -357,6 +456,29 @@ def run_pipeline_on_splits(
     artifact_paths = export_dataset(dataset, paths.status_dir, export_xlsx=bool(effective["export"].get("xlsx", True)))
     validation_path = write_json(validation, paths.status_dir / "validation.json")
     evaluation_path = write_json(evaluation, paths.status_dir / "evaluation.json")
+    raw_evaluation_path = write_json(
+        {
+            "stage": "raw",
+            "evaluation": raw_evaluation,
+            "selected_validation": raw_selected_validation,
+            "candidate_validation": raw_candidate_validation,
+            "interpretation": (
+                "Métricas calculadas nas colunas-base antes de normalização final, pós-processamento "
+                "e criação dos campos derivados. O dataset raw completo não é persistido."
+            ),
+        },
+        paths.status_dir / "raw_evaluation.json",
+    )
+    final_evaluation_path = write_json(
+        {
+            "stage": "final",
+            "evaluation": evaluation,
+            "validation": validation,
+            "interpretation": "Métricas calculadas após normalização, pós-processamento e validação estrutural final.",
+        },
+        paths.status_dir / "final_evaluation.json",
+    )
+    raw_final_comparison_path = write_json(raw_final_comparison, paths.status_dir / "raw_final_comparison.json")
     privacy = evaluation.get("privacy", {})
     conditional_income = evaluation.get("conditional_income", {})
     memorization_path = write_json(
@@ -422,6 +544,9 @@ def run_pipeline_on_splits(
         {
             "generation_accounting": generation_accounting,
             "candidate_validation": candidate_validation,
+            "raw_candidate_validation": raw_candidate_validation,
+            "raw_selected_validation": raw_selected_validation,
+            "raw_final_comparison": raw_final_comparison,
         },
         paths.status_dir / "generation.json",
     )
@@ -437,6 +562,9 @@ def run_pipeline_on_splits(
         **artifact_paths,
         "validation": validation_path,
         "evaluation": evaluation_path,
+        "raw_evaluation": raw_evaluation_path,
+        "final_evaluation": final_evaluation_path,
+        "raw_final_comparison": raw_final_comparison_path,
         "memorization_metrics": memorization_path,
         "duplicate_base_rows": duplicate_base_rows_path,
         "exact_train_matches": exact_train_matches_path,

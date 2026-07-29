@@ -89,4 +89,8 @@ A avaliação de privacidade e diversidade passou a distinguir duplicidade de co
 
 A renda também passou a ser avaliada por grupos condicionais de ocupação, escolaridade, faixa etária e região. O `income_model_version` registra a versão da calibração sintética de renda separadamente da versão do vocabulário categórico.
 
+O `income_model_version = 3` refinou exclusivamente parâmetros de dispersão e cauda da renda. Ele não altera escolaridades permitidas, pesos das ocupações, idade mínima, região, gênero, dependentes, estado civil, municípios ou o vocabulário categórico. A seleção da calibração usou seeds `41`, `42` e `43`; a confirmação da CTGAN candidate_c usou seeds independentes `44`, `45` e `46`.
+
+Nos benchmarks de confirmação, as métricas são persistidas em dois estágios. `raw_evaluation.json` descreve a amostra das colunas-base antes de normalização final e pós-processamento. `final_evaluation.json` descreve o dataset exportável depois de reparo, seleção global e validação estrutural. `raw_final_comparison.json` resume a dependência do pós-processamento, incluindo validade estrutural bruta e final, taxa de reparo, taxa de rejeição e mudanças de distribuição.
+
 As métricas são diagnósticas: apoiam avaliação de risco e qualidade, mas não garantem anonimização absoluta nem representatividade da população brasileira. Detalhes estão em `docs/privacy-and-diversity.md` e `docs/income-realism.md`.

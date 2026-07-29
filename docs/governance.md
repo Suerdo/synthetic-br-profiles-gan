@@ -132,3 +132,7 @@ A página `Governança` apresenta os cards `Diversidade e Memorização` e `Real
 As fontes exibidas incluem `evaluation.json → privacy`, `evaluation.json → conditional_income`, `quality_gates.json` e `manifest.json`. A interface não carrega datasets completos para montar o histórico.
 
 Correspondência exata com treino é um indicador de possível memorização, mas não constitui prova definitiva de vazamento. Correspondência com holdout ajuda a interpretar coincidências inerentes à distribuição.
+
+O `income_model_version` é exibido separadamente da versão do vocabulário. A versão 3 refina a calibração sintética de renda e deve ser interpretada como parâmetro experimental do projeto, não como dado salarial oficial.
+
+O artefato CTGAN criado após a confirmação independente da candidate_c possui finalidade `recommended_candidate`. Esse status indica que o artefato pode ser considerado em uma etapa posterior de aprovação, mas não significa `approved`, `default` ou `production`.

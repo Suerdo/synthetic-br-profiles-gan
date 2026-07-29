@@ -33,6 +33,10 @@ from synthetic_br_profiles_gan.config import (
     validate_benchmark_config,
 )
 from synthetic_br_profiles_gan.evaluation.quality_gates import DEFAULT_QUALITY_GATES
+from synthetic_br_profiles_gan.evaluation.income_calibration import (
+    REQUIRED_INCOME_OCCUPATIONS,
+    run_income_calibration_analysis,
+)
 from synthetic_br_profiles_gan.evaluation.vocabulary import (
     DEFAULT_LOW_COUNT_THRESHOLD,
     DEFAULT_MINIMUM_INCOME_GROUP_COUNT,
@@ -1240,11 +1244,83 @@ def _write_capacity_outputs(
     return outputs
 
 
+def run_income_calibration_benchmark(
+    config: ConfigDict,
+    started_at: datetime | None = None,
+    started_perf: float | None = None,
+) -> dict[str, Any]:
+    """Executa avaliação controlada de versões do modelo sintético de renda."""
+    started = started_at or datetime.now(timezone.utc)
+    perf_started = started_perf or time.perf_counter()
+    benchmark_id = build_benchmark_id(str(config["benchmark"]["name"]), started)
+    benchmark_dir = Path(config["outputs"]["base_directory"]) / benchmark_id
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    save_yaml_config(config, benchmark_dir / "benchmark_config.yaml")
+    calibration_config = config.get("income_calibration", {})
+    rows_per_occupation = int(calibration_config.get("rows_per_occupation", 5000))
+    occupations = tuple(calibration_config.get("occupations", REQUIRED_INCOME_OCCUPATIONS))
+    analysis = run_income_calibration_analysis(
+        seeds=[int(seed) for seed in config["benchmark"]["seeds"]],
+        rows_per_occupation=rows_per_occupation,
+        occupations=occupations,
+    )
+    summary_frame = pd.DataFrame(analysis["rows"])
+    compression_frame = pd.DataFrame(analysis["compression"])
+    overlap_frame = pd.DataFrame(analysis["overlap"])
+    ranking_frame = pd.DataFrame(analysis["ranking"])
+    outputs: dict[str, Path] = {
+        "summary_csv": benchmark_dir / "income_calibration_summary.csv",
+        "summary_parquet": benchmark_dir / "income_calibration_summary.parquet",
+        "compression_csv": benchmark_dir / "income_calibration_compression.csv",
+        "overlap_csv": benchmark_dir / "income_calibration_overlap.csv",
+        "ranking_csv": benchmark_dir / "income_calibration_ranking.csv",
+    }
+    summary_frame.to_csv(outputs["summary_csv"], index=False, encoding="utf-8-sig")
+    summary_frame.to_parquet(outputs["summary_parquet"], index=False)
+    compression_frame.to_csv(outputs["compression_csv"], index=False, encoding="utf-8-sig")
+    overlap_frame.to_csv(outputs["overlap_csv"], index=False, encoding="utf-8-sig")
+    ranking_frame.to_csv(outputs["ranking_csv"], index=False, encoding="utf-8-sig")
+    outputs["analysis_json"] = write_json(analysis, benchmark_dir / "income_calibration_analysis.json")
+    ended = datetime.now(timezone.utc)
+    duration_seconds = float(time.perf_counter() - perf_started)
+    outputs["benchmark_manifest"] = write_json(
+        _benchmark_manifest(
+            benchmark_id=benchmark_id,
+            config=config,
+            started_at=started,
+            ended_at=ended,
+            duration_seconds=duration_seconds,
+            expected_runs=len(config["benchmark"]["seeds"]) * len(occupations) * 4,
+            completed_runs=len(config["benchmark"]["seeds"]) * len(occupations) * 4,
+            failed_runs=0,
+            status="completed",
+            artifact_paths={**outputs, "benchmark_config": benchmark_dir / "benchmark_config.yaml"},
+        ),
+        benchmark_dir / "benchmark_manifest.json",
+    )
+    return {
+        "benchmark_id": benchmark_id,
+        "benchmark_dir": benchmark_dir,
+        "status": "completed",
+        "completed_runs": len(config["benchmark"]["seeds"]) * len(occupations) * 4,
+        "failed_runs": 0,
+        "outputs": outputs,
+        "summary": {
+            "selected_calibration": analysis["selected_calibration"],
+            "versions": sorted({row["version_name"] for row in analysis["rows"]}),
+            "occupations": list(occupations),
+            "seeds": list(config["benchmark"]["seeds"]),
+        },
+    }
+
+
 def run_benchmark(config: ConfigDict | None = None) -> dict[str, Any]:
     """Executa o benchmark e grava artefatos no nível do benchmark."""
     started = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     effective = resolve_benchmark_config(config)
+    if effective["benchmark"].get("type") == "income_calibration":
+        return run_income_calibration_benchmark(effective, started_at=started, started_perf=started_perf)
     if effective["benchmark"].get("type") == "capacity":
         return run_capacity_benchmark(effective, started_at=started, started_perf=started_perf)
     benchmark_id = build_benchmark_id(str(effective["benchmark"]["name"]), started)

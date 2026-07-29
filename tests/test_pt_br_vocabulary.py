@@ -84,7 +84,7 @@ class PtBRVocabularyTest(unittest.TestCase):
         self.assertEqual(DATA_LOCALE, "pt-BR")
         self.assertEqual(UNICODE_NORMALIZATION, "NFC")
         self.assertEqual(CATEGORICAL_VOCABULARY_VERSION, 2)
-        self.assertEqual(INCOME_MODEL_VERSION, 2)
+        self.assertEqual(INCOME_MODEL_VERSION, 3)
 
     def test_municipalities_are_accented_and_nfc(self) -> None:
         expected = {
@@ -320,7 +320,7 @@ class PtBRVocabularyTest(unittest.TestCase):
             self.assertEqual(manifest["data_locale"], "pt-BR")
             self.assertEqual(manifest["unicode_normalization"], "NFC")
             self.assertEqual(manifest["categorical_vocabulary_version"], 2)
-            self.assertEqual(manifest["income_model_version"], 2)
+            self.assertEqual(manifest["income_model_version"], 3)
 
             output = root / "dataset.csv"
             output.write_text("x", encoding="utf-8")
@@ -346,7 +346,7 @@ class PtBRVocabularyTest(unittest.TestCase):
             self.assertEqual(generated["source_model_vocabulary_version"], 1)
             self.assertEqual(generated["output_vocabulary_version"], 2)
             self.assertEqual(generated["source_model_income_version"], 1)
-            self.assertEqual(generated["output_income_model_version"], 2)
+            self.assertEqual(generated["output_income_model_version"], 3)
             self.assertTrue(generated["legacy_value_normalization_applied"])
 
             legacy = root / "legacy-programmatic"

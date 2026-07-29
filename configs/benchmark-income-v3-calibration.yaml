@@ -1,0 +1,40 @@
+benchmark:
+  name: income-v3-calibration
+  type: income_calibration
+  models:
+    - programmatic
+  seeds:
+    - 41
+    - 42
+    - 43
+  train_sizes:
+    - 20000
+  synthetic_rows: 20000
+  holdout_fraction: 0.20
+  assessment_mode: experimental
+  continue_on_error: true
+
+calibration:
+  income_model_version: 3
+  income_model_variant: selected
+
+income_calibration:
+  rows_per_occupation: 5000
+
+models:
+  programmatic: {}
+
+generation:
+  batch_size: 2048
+  max_batches: 20
+  date_format: "%Y-%m-%d"
+
+outputs:
+  base_directory: artifacts/benchmarks
+  export_csv: true
+  export_parquet: true
+  export_json: true
+  export_individual_xlsx: false
+
+ranking:
+  enabled: false

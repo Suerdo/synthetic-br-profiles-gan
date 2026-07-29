@@ -700,3 +700,41 @@ Os benchmarks `income_realism` avaliam diversidade, correspondência exata e pla
 Os resultados antigos permanecem históricos. A comparação entre baseline e v2 deve considerar frequência de caudas, p95, p99, duplicidade de combinações-base, match exato com treino e holdout, custo computacional e estabilidade entre seeds.
 
 Nenhuma recomendação de artefato neural deve ser feita por uma única média. Gates obrigatórios continuam prevalecendo sobre scores agregados.
+
+### Refinamento final da renda v3
+
+O refinamento final criou uma versão separada de calibração, `income_model_version = 3`, sem alterar `categorical_vocabulary_version = 2`. A seleção da calibração usou:
+
+- `configs/benchmark-income-v3-calibration-smoke.yaml`;
+- `configs/benchmark-income-v3-calibration.yaml`;
+- seeds de seleção `41`, `42` e `43`;
+- versões comparadas `income_v1`, `income_v2`, `income_v3_candidate_a` e `income_v3_candidate_b`.
+
+A variante selecionada foi `income_v3_candidate_b`, registrada como `selected_calibration`. Ela busca um ponto intermediário entre a cauda ampla da v1 e a compressão observada na v2. A comparação avalia mediana, p95, p99, desvio padrão, intervalo interquartil, taxa de cauda alta, sobreposição de distribuições e inversões agregadas de ranking.
+
+### Confirmação independente da CTGAN candidate_c
+
+A CTGAN candidate_c foi congelada como perfil `ctgan_income_v3_recommended_candidate` e confirmada em seeds independentes `44`, `45` e `46`, que não foram usadas na seleção da renda. A confirmação foi executada com:
+
+- `configs/benchmark-ctgan-candidate-c-confirmation-smoke.yaml`;
+- `configs/benchmark-ctgan-candidate-c-confirmation.yaml`;
+- treino de 20.000 registros;
+- holdout de 5.000 registros;
+- 20.000 registros sintéticos por seed;
+- `income_model_version = 3`;
+- vocabulário categórico versão 2;
+- CTGAN 0.12.1, CPU, `epochs: 20`, `batch_size: 500`, `pac: 10`, `generator_lr: 0.0001` e `discriminator_lr: 0.0001`.
+
+Resultado da confirmação:
+
+| Seed | Status | Tempo de treino | Tempo de geração | Wasserstein norm. renda | KS renda | Dif. correlação | Duplicidade-base | Match treino | Pico de RSS |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 44 | `approved` | 309,9 s | 50,3 s | 0,213 | 0,122 | 0,059 | 0,000 | 0,000 | 4.059 MB |
+| 45 | `approved` | 824,8 s | 42,0 s | 0,111 | 0,056 | 0,074 | 0,000 | 0,000 | 4.067 MB |
+| 46 | `approved` | 963,5 s | 43,7 s | 0,067 | 0,032 | 0,051 | 0,000 | 0,000 | 3.799 MB |
+
+As três seeds de confirmação passaram nos gates obrigatórios, sem identificadores duplicados, sem linhas finais inválidas, sem duplicidade de combinações-base e sem match exato com treino. Houve um match exato com holdout na seed `44`, interpretado como métrica de controle e não como evidência isolada de memorização.
+
+Cada run passou a persistir `raw_evaluation.json`, `final_evaluation.json` e `raw_final_comparison.json`. A confirmação mostrou validade estrutural final de 100%, mas validade bruta baixa antes do pós-processamento, reforçando que a qualidade final da CTGAN ainda depende de normalização, reparo e seleção global.
+
+O artefato `artifacts/models/ctgan/20260729T231900Z-income-v3-recommended-candidate/` foi produzido com finalidade `recommended_candidate`. Ele não é `approved`, `default` nem `production`; uma aprovação futura exige decisão explícita.

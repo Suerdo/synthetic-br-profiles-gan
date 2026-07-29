@@ -946,6 +946,25 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(len(benchmark_matrix(smoke)), 3)
         self.assertEqual(len(benchmark_matrix(main)), 9)
 
+    def test_income_v3_calibration_and_confirmation_configs_validate(self) -> None:
+        calibration = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-income-v3-calibration.yaml"))
+        confirmation = resolve_benchmark_config(load_yaml_config(ROOT / "configs" / "benchmark-ctgan-candidate-c-confirmation.yaml"))
+
+        self.assertEqual(calibration["benchmark"]["type"], "income_calibration")
+        self.assertEqual(calibration["benchmark"]["seeds"], [41, 42, 43])
+        self.assertEqual(calibration["calibration"]["income_model_version"], 3)
+        self.assertEqual(calibration["calibration"]["income_model_variant"], "selected")
+        self.assertGreater(calibration["income_calibration"]["rows_per_occupation"], 0)
+
+        self.assertEqual(confirmation["benchmark"]["type"], "income_realism")
+        self.assertEqual(confirmation["benchmark"]["models"], ["ctgan"])
+        self.assertEqual(confirmation["benchmark"]["seeds"], [44, 45, 46])
+        self.assertEqual(confirmation["calibration"]["income_model_version"], 3)
+        self.assertEqual(confirmation["calibration"]["income_model_variant"], "selected")
+        self.assertEqual(confirmation["models"]["ctgan"]["epochs"], 20)
+        self.assertEqual(confirmation["models"]["ctgan"]["batch_size"], 500)
+        self.assertNotEqual(calibration["benchmark"]["seeds"], confirmation["benchmark"]["seeds"])
+
     @unittest.skipUnless(os.environ.get("RUN_SLOW_MODEL_TESTS") == "1", "slow optional benchmark test")
     def test_real_three_model_smoke_benchmark(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
