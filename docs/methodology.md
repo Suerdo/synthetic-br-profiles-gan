@@ -94,3 +94,22 @@ O `income_model_version = 3` refinou exclusivamente parâmetros de dispersão e 
 Nos benchmarks de confirmação, as métricas são persistidas em dois estágios. `raw_evaluation.json` descreve a amostra das colunas-base antes de normalização final e pós-processamento. `final_evaluation.json` descreve o dataset exportável depois de reparo, seleção global e validação estrutural. `raw_final_comparison.json` resume a dependência do pós-processamento, incluindo validade estrutural bruta e final, taxa de reparo, taxa de rejeição e mudanças de distribuição.
 
 As métricas são diagnósticas: apoiam avaliação de risco e qualidade, mas não garantem anonimização absoluta nem representatividade da população brasileira. Detalhes estão em `docs/privacy-and-diversity.md` e `docs/income-realism.md`.
+
+### Diagnóstico de validade bruta por regra
+
+A investigação da CTGAN income v3 `recommended_candidate` adicionou uma camada diagnóstica sem alterar treinamento, pós-processamento, quality gates ou artefatos históricos. O objetivo é separar o que foi aprendido pela amostra bruta do que foi corrigido pelo pipeline.
+
+As taxas possuem denominadores explícitos:
+
+- `raw_structural_validity_rate`: linhas brutas selecionadas válidas divididas pelas linhas brutas selecionadas.
+- `final_structural_validity_rate`: linhas finais válidas divididas pelas linhas finais selecionadas.
+- `postprocessing_repair_rate`: ganho positivo de validade estrutural entre `raw` e `final`, calculado sobre as linhas selecionadas.
+- `postprocessing_rejection_rate`: candidatos inválidos depois do pós-processamento e da validação global, divididos por todos os candidatos pós-processados nos batches.
+- `candidate_acceptance_rate`: candidatos aceitos por regras locais de batch, divididos por todos os candidatos gerados.
+- `global_acceptance_rate`: candidatos aceitos pela validação global, divididos por todos os candidatos gerados.
+
+O diagnóstico também separa `repair`, `replacement` e `rejection`. `repair` indica ajuste de campos relacionados preservando o núcleo semântico principal da linha; `replacement` indica substituição integral de algum campo semântico central; `rejection` indica candidato não aproveitado após validação global.
+
+As regras avaliadas separadamente incluem categorias conhecidas, domínios de idade, renda e dependentes, relações `Regiao × Estado`, `Estado × Municipio`, `Estado × DDD`, `Ocupacao × Escolaridade`, `Ocupacao × Idade`, `Estado_Civil × Idade`, validade geográfica conjunta, validade profissional conjunta, validade não relacional e validade estrutural global.
+
+A validade global bruta é a interseção das regras. Por isso, ela pode ser muito menor do que a validade de cada bloco isolado. Na CTGAN income v3, categorias individuais e relações profissionais tiveram alta validade, enquanto as relações geográficas conjuntas concentraram as falhas brutas.

@@ -136,3 +136,20 @@ Correspondência exata com treino é um indicador de possível memorização, ma
 O `income_model_version` é exibido separadamente da versão do vocabulário. A versão 3 refina a calibração sintética de renda e deve ser interpretada como parâmetro experimental do projeto, não como dado salarial oficial.
 
 O artefato CTGAN criado após a confirmação independente da candidate_c possui finalidade `recommended_candidate`. Esse status indica que o artefato pode ser considerado em uma etapa posterior de aprovação, mas não significa `approved`, `default` ou `production`.
+
+## Semântica das métricas raw e final
+
+A investigação diagnóstica da CTGAN income v3 `recommended_candidate` formalizou os denominadores das taxas exibidas em governança. Quando essas métricas estiverem disponíveis, a interface e a documentação devem usar a seguinte interpretação:
+
+- `raw_structural_validity_rate`: proporção de linhas brutas selecionadas que passam nas regras estruturais das colunas-base.
+- `final_structural_validity_rate`: proporção de linhas finais selecionadas que passam na validação estrutural completa.
+- `postprocessing_repair_rate`: recuperação agregada de validade entre `raw` e `final`, não uma contagem direta de campos alterados.
+- `postprocessing_rejection_rate`: proporção de candidatos pós-processados que ainda falham na validação global e não são aproveitados.
+- `candidate_acceptance_rate`: proporção de candidatos aceitos pelas regras locais de batch.
+- `global_acceptance_rate`: proporção de candidatos aceitos pela validação global.
+
+`Repair`, `replacement` e `rejection` são conceitos distintos. Um reparo ajusta campos relacionados preservando o núcleo semântico principal da linha. Uma substituição troca integralmente algum campo semântico central. Uma rejeição indica que o candidato não foi selecionado.
+
+As métricas de distância de renda devem distinguir `wasserstein_distance_absolute_brl`, expresso em reais, de `wasserstein_distance_normalized`, normalizado pela escala da referência. A distância absoluta não deve ser apresentada sem unidade.
+
+Na CTGAN income v3 diagnosticada, a dependência do pós-processamento foi classificada como `alta`: a validade final foi 100%, mas a validade bruta global ficou próxima de 0,2% devido principalmente a relações geográficas incompatíveis. Essa classificação não promove nem reprova o artefato; ela informa o grau de dependência do pipeline antes de qualquer decisão de aprovação.

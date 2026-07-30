@@ -738,3 +738,38 @@ As três seeds de confirmação passaram nos gates obrigatórios, sem identifica
 Cada run passou a persistir `raw_evaluation.json`, `final_evaluation.json` e `raw_final_comparison.json`. A confirmação mostrou validade estrutural final de 100%, mas validade bruta baixa antes do pós-processamento, reforçando que a qualidade final da CTGAN ainda depende de normalização, reparo e seleção global.
 
 O artefato `artifacts/models/ctgan/20260729T231900Z-income-v3-recommended-candidate/` foi produzido com finalidade `recommended_candidate`. Ele não é `approved`, `default` nem `production`; uma aprovação futura exige decisão explícita.
+
+### Diagnóstico da validade bruta da CTGAN income v3
+
+Depois da confirmação da CTGAN candidate_c, foi executada uma investigação estritamente diagnóstica, sem novo treinamento e sem alteração dos artefatos preservados. O relatório foi gravado em:
+
+```text
+artifacts/diagnostics/ctgan-income-v3-raw-validity-20260730T001234Z/
+```
+
+Arquivos produzidos:
+
+- `metric_semantics.json`;
+- `ctgan_income_v3_raw_validity_diagnostic.json`;
+- `ctgan_income_v3_raw_validity_by_rule.csv`;
+- `raw_rule_failure_intersections.json`;
+- `raw_rule_failure_cooccurrence.csv`;
+- `postprocessing_field_changes.json`;
+- `postprocessing_transition_summary.csv`;
+- `ctgan_income_v3_postprocessing_summary.csv`.
+
+Resumo por seed:
+
+| Seed | Validade raw global | Validade final | Validade geográfica raw | Validade profissional raw | Rejeição pós-processamento | Dependência |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 44 | 0,205% | 100,000% | 0,210% | 92,705% | 15,991% | alta |
+| 45 | 0,180% | 100,000% | 0,190% | 92,920% | 17,273% | alta |
+| 46 | 0,285% | 100,000% | 0,305% | 94,230% | 15,914% | alta |
+
+A regra mais redutora foi geográfica, principalmente `Estado × Municipio` e `Estado × DDD`. As categorias individuais foram conhecidas em 100% das linhas avaliadas, e `Ocupacao × Escolaridade` teve validade bruta de 100% nas três seeds. Isso indica que a baixa validade global bruta não decorre de vocabulário desconhecido nem de colapso profissional, mas da combinação simultânea de várias relações, com predominância das relações geográficas.
+
+Nas seeds `44` e `45`, a ocupação ausente entre as linhas selecionadas foi `Diretor`. Ela apareceu nos candidatos rejeitados ou excedentes, portanto não há evidência de remoção pelo pós-processamento. Na seed `46`, a cobertura de ocupações foi completa.
+
+A distância de Wasserstein da renda foi registrada em BRL e normalizada pelo IQR da referência. No resultado final, os valores absolutos foram R$ 434,71, R$ 238,31 e R$ 159,06 para as seeds `44`, `45` e `46`, respectivamente; os valores normalizados foram 0,203, 0,114 e 0,075.
+
+Esse diagnóstico não promove nem descarta o artefato. Ele apenas formaliza a semântica das métricas e evidencia a dependência do pós-processamento antes de qualquer decisão futura de aprovação da CTGAN.
