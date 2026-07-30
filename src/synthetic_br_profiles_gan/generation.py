@@ -31,6 +31,7 @@ def select_valid_candidates(
     else:
         batch_mask = batch_valid_mask.reindex(candidates.index).fillna(False).astype(bool)
     accepted = candidates.loc[mask].reset_index(drop=True)
+    selected_candidate_indices = [int(index) for index in candidates.loc[mask].index[:n_target]]
     selected = accepted.iloc[:n_target].copy()
     accepted_by_global_rules = int(len(accepted))
     accepted_by_batch_rules = int(batch_mask.sum())
@@ -41,6 +42,7 @@ def select_valid_candidates(
         "accepted_by_batch_rules": accepted_by_batch_rules,
         "accepted_by_global_rules": accepted_by_global_rules,
         "selected": selected_count,
+        "selected_candidate_indices": selected_candidate_indices,
         "accepted_but_not_selected": int(max(accepted_by_global_rules - selected_count, 0)),
         "rejected_by_rules": int(len(candidates) - accepted_by_global_rules),
         "rejected_by_batch_rules": int(len(candidates) - accepted_by_batch_rules),

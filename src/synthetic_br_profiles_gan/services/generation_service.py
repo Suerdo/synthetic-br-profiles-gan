@@ -13,6 +13,11 @@ import pandas as pd
 
 from synthetic_br_profiles_gan.column_catalog import ColumnSelection, resolve_column_selection
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge
+from synthetic_br_profiles_gan.domain.geography import (
+    GEOGRAPHY_MODEL_VERSION,
+    LEGACY_GEOGRAPHY_MODEL_VERSION,
+    geography_catalog_checksum,
+)
 from synthetic_br_profiles_gan.exceptions import ConfigurationError, StructuralValidationError
 from synthetic_br_profiles_gan.localization import (
     CATEGORICAL_VOCABULARY_VERSION,
@@ -215,6 +220,13 @@ def build_generation_manifest(
         "output_vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
         "source_model_income_version": _source_income_model_version(training_manifest),
         "output_income_model_version": INCOME_MODEL_VERSION,
+        "source_model_geography_version": _source_geography_model_version(training_manifest),
+        "output_geography_model_version": _output_geography_model_version(model, training_manifest),
+        "geography_catalog_checksum": (
+            geography_catalog_checksum()
+            if _output_geography_model_version(model, training_manifest) == GEOGRAPHY_MODEL_VERSION
+            else None
+        ),
         "legacy_value_normalization_applied": bool(source_vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
         "model_artifact": model_artifact,
         "source_training_manifest": None if training_manifest is None else training_manifest.get("created_at_utc"),
@@ -306,6 +318,21 @@ def _source_income_model_version(training_manifest: dict[str, Any] | None) -> in
         return int(training_manifest.get("income_model_version", 1))
     except (TypeError, ValueError):
         return 1
+
+
+def _source_geography_model_version(training_manifest: dict[str, Any] | None) -> int:
+    if training_manifest is None:
+        return LEGACY_GEOGRAPHY_MODEL_VERSION
+    try:
+        return int(training_manifest.get("geography_model_version", LEGACY_GEOGRAPHY_MODEL_VERSION))
+    except (TypeError, ValueError):
+        return LEGACY_GEOGRAPHY_MODEL_VERSION
+
+
+def _output_geography_model_version(model: str, training_manifest: dict[str, Any] | None) -> int:
+    if model == "ctgan":
+        return _source_geography_model_version(training_manifest)
+    return LEGACY_GEOGRAPHY_MODEL_VERSION
 
 
 def _normalize_model_name(model: str | None) -> str | None:

@@ -1,0 +1,72 @@
+benchmark:
+  name: ctgan-income-v3-geo-v2-confirmation
+  type: income_realism
+  models:
+    - ctgan
+  seeds:
+    - 47
+    - 48
+    - 49
+  train_sizes:
+    - 20000
+  synthetic_rows: 20000
+  holdout_fraction: 0.20
+  assessment_mode: experimental
+  continue_on_error: true
+
+calibration:
+  income_model_version: 3
+  income_model_variant: selected
+
+models:
+  ctgan:
+    epochs: 20
+    batch_size: 500
+    generator_lr: 0.0001
+    discriminator_lr: 0.0001
+    generator_decay: 0.000001
+    discriminator_decay: 0.000001
+    discriminator_steps: 1
+    log_frequency: false
+    pac: 10
+    geography_model_version: 2
+    verbose: false
+    enable_gpu: false
+    cuda: null
+
+generation:
+  batch_size: 2048
+  max_batches: 20
+  date_format: "%Y-%m-%d"
+
+evaluation:
+  privacy:
+    max_nearest_neighbor_rows: 1000
+  income_realism:
+    minimum_group_rows: 30
+
+quality_gates:
+  duplicate_base_row_rate_max:
+    value: 0.01
+    mandatory: false
+
+outputs:
+  base_directory: artifacts/benchmarks
+  export_csv: true
+  export_parquet: true
+  export_json: true
+  export_individual_xlsx: false
+
+execution:
+  parallelism: 1
+  warmup_backends: true
+  rotate_model_order_by_seed: false
+
+resource_limits:
+  max_training_seconds_per_run: null
+  max_total_seconds_per_run: null
+  max_peak_memory_mb: null
+  stop_larger_sizes_after_resource_failure: true
+
+ranking:
+  enabled: false

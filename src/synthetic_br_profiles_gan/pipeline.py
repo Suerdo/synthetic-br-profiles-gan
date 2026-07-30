@@ -32,6 +32,13 @@ from synthetic_br_profiles_gan.config import (
     validate_model_config,
     validate_pipeline_config,
 )
+from synthetic_br_profiles_gan.domain.geography import (
+    GEOGRAPHY_COLUMNS,
+    GEOGRAPHY_CATALOG_VERSION,
+    GEOGRAPHY_MODEL_VERSION,
+    LEGACY_GEOGRAPHY_MODEL_VERSION,
+    geography_catalog_checksum,
+)
 from synthetic_br_profiles_gan.evaluation.metrics import evaluate_synthetic_data
 from synthetic_br_profiles_gan.evaluation.quality_gates import DEFAULT_QUALITY_GATES, evaluate_quality_gates
 from synthetic_br_profiles_gan.exceptions import QualityGateError
@@ -157,11 +164,13 @@ def generate_profiles(
     batch_size: int = 1024,
     max_batches: int = 20,
     date_format: str = "%Y-%m-%d",
-) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
+    return_raw: bool = False,
+) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]] | tuple[pd.DataFrame, dict[str, Any], dict[str, Any], dict[str, pd.DataFrame]]:
     """Gera perfis finais e contabiliza linhas aceitas, rejeitadas e excedentes."""
     fake = criar_faker(seed)
     rng = random.Random(seed)
     candidates: list[pd.DataFrame] = []
+    raw_candidates: list[pd.DataFrame] = []
     valid_masks: list[pd.Series] = []
     batch_lengths: list[int] = []
     attempts = 0
@@ -189,6 +198,7 @@ def generate_profiles(
         validation = validate_profile_dataframe(final, metadata=metadata, final=True, reference_date=reference_date)
         candidate_validation_seconds += time.perf_counter() - stage_started
         candidates.append(final)
+        raw_candidates.append(core.reset_index(drop=True))
         batch_lengths.append(int(len(final)))
         valid_masks.append(validation.valid_mask.reset_index(drop=True))
         accepted_so_far = int(pd.concat(valid_masks, ignore_index=True).sum())
@@ -206,6 +216,7 @@ def generate_profiles(
                 break
 
     all_candidates = pd.concat(candidates, ignore_index=True) if candidates else pd.DataFrame()
+    all_raw_candidates = pd.concat(raw_candidates, ignore_index=True) if raw_candidates else pd.DataFrame()
     all_masks = pd.concat(valid_masks, ignore_index=True) if valid_masks else pd.Series(dtype=bool)
     if full_validation is None or len(full_validation.valid_mask) != len(all_candidates):
         full_validation = validate_profile_dataframe(
@@ -242,6 +253,14 @@ def generate_profiles(
     selection.accounting["sampling_seconds"] = float(sampling_seconds)
     selection.accounting["postprocessing_seconds"] = float(postprocessing_seconds)
     selection.accounting["candidate_validation_seconds"] = float(candidate_validation_seconds)
+    if return_raw:
+        selected_indices = selection.accounting.get("selected_candidate_indices", [])
+        raw_selected = all_raw_candidates.loc[selected_indices].reset_index(drop=True) if selected_indices else pd.DataFrame()
+        return selection.selected, selection.accounting, full_validation.report, {
+            "all_candidates": all_raw_candidates,
+            "all_final_candidates": all_candidates,
+            "selected": raw_selected,
+        }
     return selection.selected, selection.accounting, full_validation.report
 
 
@@ -266,6 +285,184 @@ def _count_cross_batch_identifier_duplicates(candidates: pd.DataFrame, batch_len
             if len(batches) > 1:
                 duplicate_count += max(len(group) - 1, 0)
     return int(duplicate_count)
+
+
+def _validation_rate(report: dict[str, Any]) -> float:
+    rows = int(report.get("n_rows", 0) or 0)
+    if rows <= 0:
+        return 0.0
+    return float(int(report.get("valid_rows", 0) or 0) / rows)
+
+
+def _max_categorical_tvd(evaluation: dict[str, Any]) -> float | None:
+    categorical = evaluation.get("against_holdout", {}).get("categorical", {})
+    values = [
+        float(metrics["total_variation_distance"])
+        for metrics in categorical.values()
+        if isinstance(metrics, dict) and metrics.get("total_variation_distance") is not None
+    ]
+    return max(values) if values else None
+
+
+def _conditional_income_distance(evaluation: dict[str, Any]) -> float | None:
+    summary = evaluation.get("conditional_income", {}).get("summary", {})
+    value = summary.get("mean_conditional_income_wasserstein")
+    return None if value is None else float(value)
+
+
+def _raw_final_comparison(
+    raw_validation: dict[str, Any],
+    final_validation: dict[str, Any],
+    raw_evaluation: dict[str, Any],
+    final_evaluation: dict[str, Any],
+    generation_accounting: dict[str, Any],
+) -> dict[str, Any]:
+    raw_validity = _validation_rate(raw_validation)
+    final_validity = _validation_rate(final_validation)
+    raw_tvd = _max_categorical_tvd(raw_evaluation)
+    final_tvd = _max_categorical_tvd(final_evaluation)
+    raw_income = _conditional_income_distance(raw_evaluation)
+    final_income = _conditional_income_distance(final_evaluation)
+    raw_geography = raw_evaluation.get("geography", {}).get("validity", {})
+    final_geography = final_evaluation.get("geography", {}).get("validity", {})
+    raw_geography_diversity = raw_evaluation.get("geography", {}).get("diversity", {})
+    final_geography_diversity = final_evaluation.get("geography", {}).get("diversity", {})
+    raw_relationships = raw_evaluation.get("relational_validity", {}).get("validity", {})
+    final_relationships = final_evaluation.get("relational_validity", {}).get("validity", {})
+    total_candidates = int(generation_accounting.get("total_candidates", 0) or 0)
+    rejected = int(generation_accounting.get("rejected_by_global_rules", generation_accounting.get("rejected_by_rules", 0)) or 0)
+    return {
+        "raw_structural_validity_rate": raw_validity,
+        "final_structural_validity_rate": final_validity,
+        "postprocessing_repair_rate": float(max(final_validity - raw_validity, 0.0)),
+        "postprocessing_rejection_rate": float(0.0 if total_candidates <= 0 else rejected / total_candidates),
+        "categorical_tvd_raw": raw_tvd,
+        "categorical_tvd_final": final_tvd,
+        "conditional_income_distance_raw": raw_income,
+        "conditional_income_distance_final": final_income,
+        "known_geography_key_rate_raw": raw_geography.get("known_geography_key_rate"),
+        "known_geography_key_rate_final": final_geography.get("known_geography_key_rate"),
+        "raw_geographic_validity_rate": raw_geography.get("raw_geographic_validity_rate"),
+        "final_geographic_validity_rate": final_geography.get("raw_geographic_validity_rate"),
+        "raw_professional_validity_rate": raw_relationships.get("professional_validity_rate"),
+        "final_professional_validity_rate": final_relationships.get("professional_validity_rate"),
+        "raw_non_relational_validity_rate": raw_relationships.get("non_relational_validity_rate"),
+        "final_non_relational_validity_rate": final_relationships.get("non_relational_validity_rate"),
+        "state_municipality_valid_rate_raw": raw_geography.get("state_municipality_valid_rate"),
+        "state_ddd_valid_rate_raw": raw_geography.get("state_ddd_valid_rate"),
+        "region_state_valid_rate_raw": raw_geography.get("region_state_valid_rate"),
+        "geography_key_coverage_raw": raw_geography_diversity.get("geography_key_coverage"),
+        "geography_key_coverage_final": final_geography_diversity.get("geography_key_coverage"),
+        "geography_key_distribution_tvd_raw": raw_geography_diversity.get("geography_key_distribution_tvd"),
+        "geography_key_distribution_tvd_final": final_geography_diversity.get("geography_key_distribution_tvd"),
+        "raw_final_distribution_shift": (
+            None if raw_tvd is None or final_tvd is None else float(abs(float(final_tvd) - float(raw_tvd)))
+        ),
+        "raw_reason_counts": raw_validation.get("reason_counts", {}),
+        "final_reason_counts": final_validation.get("reason_counts", {}),
+        "generation_accounting": {
+            "total_candidates": total_candidates,
+            "accepted_by_batch_rules": generation_accounting.get("accepted_by_batch_rules"),
+            "accepted_by_global_rules": generation_accounting.get("accepted_by_global_rules"),
+            "rejected_by_global_rules": generation_accounting.get("rejected_by_global_rules"),
+            "selected": generation_accounting.get("selected"),
+            "batch_acceptance_rate": generation_accounting.get("batch_acceptance_rate"),
+            "global_acceptance_rate": generation_accounting.get("global_acceptance_rate"),
+        },
+        "interpretation": (
+            "Indicadores diagnósticos para distinguir a saída bruta do sintetizador do resultado "
+            "final pós-processado. Correções não são penalizadas automaticamente."
+        ),
+    }
+
+
+def _postprocessing_geography_summary(
+    raw_selected: pd.DataFrame,
+    final_selected: pd.DataFrame,
+    raw_candidate_validation: dict[str, Any],
+) -> dict[str, Any]:
+    """Resume alterações geográficas entre raw e final sem persistir linhas completas."""
+    total = int(min(len(raw_selected), len(final_selected)))
+    if total <= 0:
+        return {
+            "selected_rows": 0,
+            "geography_unchanged_rows": 0,
+            "geography_modified_rows": 0,
+            "geography_repaired_rows": 0,
+            "geography_replaced_rows": 0,
+            "geography_rejected_rows": _geography_reason_count(raw_candidate_validation),
+            "other_modified_rows": 0,
+            "field_changes": {},
+            "geography_rejection_reason_counts": _geography_reason_counts(raw_candidate_validation),
+            "interpretation": "Resumo agregado; nenhuma linha completa ou identificador derivado é persistido.",
+        }
+    raw = raw_selected.iloc[:total].reset_index(drop=True)
+    final = final_selected.iloc[:total].reset_index(drop=True)
+    changed_by_field: dict[str, pd.Series] = {}
+    for column in GEOGRAPHY_COLUMNS:
+        if column not in raw.columns or column not in final.columns:
+            changed_by_field[column] = pd.Series(False, index=raw.index)
+            continue
+        before = _canonical_compare_series(raw[column], column)
+        after = _canonical_compare_series(final[column], column)
+        changed_by_field[column] = before.ne(after)
+    geo_change_frame = pd.concat(changed_by_field.values(), axis=1)
+    geo_changed = geo_change_frame.any(axis=1)
+    state_changed = changed_by_field.get("Estado", pd.Series(False, index=raw.index))
+    geo_replaced = geo_changed & state_changed.astype(bool)
+    geo_repaired = geo_changed & ~state_changed.astype(bool)
+    non_geo_columns = [
+        column
+        for column in raw.columns
+        if column in final.columns and column not in set(GEOGRAPHY_COLUMNS)
+    ]
+    other_changed = pd.Series(False, index=raw.index)
+    for column in non_geo_columns:
+        before = _canonical_compare_series(raw[column], column)
+        after = _canonical_compare_series(final[column], column)
+        other_changed |= before.ne(after)
+    return {
+        "selected_rows": total,
+        "geography_unchanged_rows": int((~geo_changed).sum()),
+        "geography_modified_rows": int(geo_changed.sum()),
+        "geography_repaired_rows": int(geo_repaired.sum()),
+        "geography_replaced_rows": int(geo_replaced.sum()),
+        "geography_rejected_rows": _geography_reason_count(raw_candidate_validation),
+        "other_modified_rows": int((other_changed & ~geo_changed).sum()),
+        "multiple_geography_field_change_rows": int(geo_change_frame.sum(axis=1).gt(1).sum()),
+        "field_changes": {
+            column: {
+                "modified_rows": int(changed.sum()),
+                "modified_rate": float(int(changed.sum()) / total),
+            }
+            for column, changed in changed_by_field.items()
+        },
+        "geography_rejection_reason_counts": _geography_reason_counts(raw_candidate_validation),
+        "interpretation": (
+            "Reparo geográfico indica mudança em Região, Município ou DDD preservando Estado. "
+            "Substituição geográfica indica mudança de Estado. Rejeição por geografia é inferida "
+            "pelos motivos geográficos da validação raw dos candidatos e pode se sobrepor a outras regras."
+        ),
+    }
+
+
+def _canonical_compare_series(series: pd.Series, column: str) -> pd.Series:
+    if column in {"Idade", "Dependentes", "DDD"}:
+        numeric = pd.to_numeric(series, errors="coerce").round()
+        return numeric.astype("Int64").astype("string").fillna("<NA>").astype(str)
+    if column == "Renda":
+        return pd.to_numeric(series, errors="coerce").round(2).astype("string").fillna("<NA>").astype(str)
+    return series.astype("string").fillna("<NA>").astype(str)
+
+
+def _geography_reason_counts(validation: dict[str, Any]) -> dict[str, int]:
+    reason_counts = validation.get("reason_counts", {}) if isinstance(validation, dict) else {}
+    keys = ("estado_regiao_incompativel", "municipio_estado_incompativel", "ddd_estado_incompativel")
+    return {key: int(reason_counts.get(key, 0) or 0) for key in keys if int(reason_counts.get(key, 0) or 0) > 0}
+
+
+def _geography_reason_count(validation: dict[str, Any]) -> int:
+    return int(sum(_geography_reason_counts(validation).values()))
 
 
 def run_pipeline_on_splits(
@@ -308,6 +505,7 @@ def run_pipeline_on_splits(
         model_config = deep_merge(effective["calibration"], model_config)
     model_config = _resolved_model_config(selected_model, model_config)
     effective.setdefault("models", {})[selected_model] = model_config
+    geography_model_version = _geography_model_version_for_run(selected_model, model_config)
     model_dir = model_artifact_dir(artifacts_root, selected_model, run_id) / "model"
     if resource_probe is not None:
         stage_resources["memory_before_training_mb"] = resource_probe()
@@ -321,7 +519,7 @@ def run_pipeline_on_splits(
     if resource_probe is not None:
         stage_resources["memory_before_generation_mb"] = resource_probe()
     stage_started = time.perf_counter()
-    dataset, generation_accounting, candidate_validation = generate_profiles(
+    dataset, generation_accounting, candidate_validation, raw_generation = generate_profiles(
         synthesizer=synthesizer,
         n_target=requested_rows,
         metadata=metadata,
@@ -330,14 +528,28 @@ def run_pipeline_on_splits(
         batch_size=int(generation_config["batch_size"]),
         max_batches=int(generation_config["max_batches"]),
         date_format=str(generation_config["date_format"]),
+        return_raw=True,
     )
     stage_durations["generation_seconds"] = float(time.perf_counter() - stage_started)
     if resource_probe is not None:
         stage_resources["memory_after_generation_mb"] = resource_probe()
     stage_started = time.perf_counter()
     validation = validate_profile_dataframe(dataset, metadata=metadata, final=True, reference_date=reference_date).report
+    raw_selected = raw_generation.get("selected", pd.DataFrame())
+    raw_candidates = raw_generation.get("all_candidates", pd.DataFrame())
+    raw_selected_validation = validate_profile_dataframe(raw_selected, metadata=metadata, final=False, reference_date=reference_date).report
+    raw_candidate_validation = validate_profile_dataframe(raw_candidates, metadata=metadata, final=False, reference_date=reference_date).report
     stage_durations["validation_seconds"] = float(time.perf_counter() - stage_started)
     stage_started = time.perf_counter()
+    raw_evaluation = evaluate_synthetic_data(
+        raw_selected,
+        train,
+        holdout,
+        metadata,
+        max_nearest_neighbor_rows=int(effective.get("evaluation", {}).get("privacy", {}).get("max_nearest_neighbor_rows", 1000)),
+        minimum_income_group_rows=int(effective.get("evaluation", {}).get("income_realism", {}).get("minimum_group_rows", 30)),
+        geography_model_version=geography_model_version,
+    )
     evaluation = evaluate_synthetic_data(
         dataset,
         train,
@@ -345,8 +557,22 @@ def run_pipeline_on_splits(
         metadata,
         max_nearest_neighbor_rows=int(effective.get("evaluation", {}).get("privacy", {}).get("max_nearest_neighbor_rows", 1000)),
         minimum_income_group_rows=int(effective.get("evaluation", {}).get("income_realism", {}).get("minimum_group_rows", 30)),
+        geography_model_version=geography_model_version,
     )
     stage_durations["evaluation_seconds"] = float(time.perf_counter() - stage_started)
+    raw_final_comparison = _raw_final_comparison(
+        raw_validation=raw_selected_validation,
+        final_validation=validation,
+        raw_evaluation=raw_evaluation,
+        final_evaluation=evaluation,
+        generation_accounting=generation_accounting,
+    )
+    postprocessing_geography = _postprocessing_geography_summary(
+        raw_selected=raw_selected,
+        final_selected=dataset,
+        raw_candidate_validation=raw_candidate_validation,
+    )
+    raw_final_comparison["postprocessing_geography"] = postprocessing_geography
     stage_started = time.perf_counter()
     gates = evaluate_quality_gates(validation, evaluation, effective["quality_gates"])
     stage_durations["quality_gates_seconds"] = float(time.perf_counter() - stage_started)
@@ -357,6 +583,33 @@ def run_pipeline_on_splits(
     artifact_paths = export_dataset(dataset, paths.status_dir, export_xlsx=bool(effective["export"].get("xlsx", True)))
     validation_path = write_json(validation, paths.status_dir / "validation.json")
     evaluation_path = write_json(evaluation, paths.status_dir / "evaluation.json")
+    raw_evaluation_path = write_json(
+        {
+            "stage": "raw",
+            "evaluation": raw_evaluation,
+            "selected_validation": raw_selected_validation,
+            "candidate_validation": raw_candidate_validation,
+            "interpretation": (
+                "Métricas calculadas nas colunas-base antes de normalização final, pós-processamento "
+                "e criação dos campos derivados. O dataset raw completo não é persistido."
+            ),
+        },
+        paths.status_dir / "raw_evaluation.json",
+    )
+    final_evaluation_path = write_json(
+        {
+            "stage": "final",
+            "evaluation": evaluation,
+            "validation": validation,
+            "interpretation": "Métricas calculadas após normalização, pós-processamento e validação estrutural final.",
+        },
+        paths.status_dir / "final_evaluation.json",
+    )
+    raw_final_comparison_path = write_json(raw_final_comparison, paths.status_dir / "raw_final_comparison.json")
+    postprocessing_geography_path = write_json(
+        postprocessing_geography,
+        paths.status_dir / "postprocessing_geography_summary.json",
+    )
     privacy = evaluation.get("privacy", {})
     conditional_income = evaluation.get("conditional_income", {})
     memorization_path = write_json(
@@ -422,6 +675,10 @@ def run_pipeline_on_splits(
         {
             "generation_accounting": generation_accounting,
             "candidate_validation": candidate_validation,
+            "raw_candidate_validation": raw_candidate_validation,
+            "raw_selected_validation": raw_selected_validation,
+            "raw_final_comparison": raw_final_comparison,
+            "postprocessing_geography": postprocessing_geography,
         },
         paths.status_dir / "generation.json",
     )
@@ -437,6 +694,10 @@ def run_pipeline_on_splits(
         **artifact_paths,
         "validation": validation_path,
         "evaluation": evaluation_path,
+        "raw_evaluation": raw_evaluation_path,
+        "final_evaluation": final_evaluation_path,
+        "raw_final_comparison": raw_final_comparison_path,
+        "postprocessing_geography_summary": postprocessing_geography_path,
         "memorization_metrics": memorization_path,
         "duplicate_base_rows": duplicate_base_rows_path,
         "exact_train_matches": exact_train_matches_path,
@@ -468,6 +729,9 @@ def run_pipeline_on_splits(
     )
     manifest["seed_state"] = seed_state_to_dict(seed_state)
     manifest["income_model_version"] = int(effective.get("calibration", {}).get("income_model_version", 1))
+    manifest["geography_model_version"] = geography_model_version
+    manifest["geography_catalog_version"] = GEOGRAPHY_CATALOG_VERSION if geography_model_version == GEOGRAPHY_MODEL_VERSION else None
+    manifest["geography_catalog_checksum"] = geography_catalog_checksum() if geography_model_version == GEOGRAPHY_MODEL_VERSION else None
     manifest["generation_accounting"] = generation_accounting
     manifest["quality_gate_failures"] = gates.failures
     manifest["stage_durations_seconds"] = stage_durations
@@ -487,6 +751,8 @@ def run_pipeline_on_splits(
         "evaluation": evaluation,
         "quality_gates": gates_payload,
         "generation": generation_accounting,
+        "raw_final_comparison": raw_final_comparison,
+        "postprocessing_geography": postprocessing_geography,
         "manifest": manifest,
         "stage_durations": stage_durations,
         "stage_resources": stage_resources,
@@ -497,6 +763,15 @@ def run_pipeline_on_splits(
     if require_approved and status != "approved":
         raise QualityGateError(f"Run {run_id} finished with status={status}.")
     return result
+
+
+def _geography_model_version_for_run(model_name: str, model_config: dict[str, Any]) -> int:
+    if model_name != "ctgan":
+        return LEGACY_GEOGRAPHY_MODEL_VERSION
+    try:
+        return int(model_config.get("geography_model_version", LEGACY_GEOGRAPHY_MODEL_VERSION))
+    except (TypeError, ValueError):
+        return LEGACY_GEOGRAPHY_MODEL_VERSION
 
 
 def run_pipeline(

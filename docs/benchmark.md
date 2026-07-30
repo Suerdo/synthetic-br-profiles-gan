@@ -700,3 +700,143 @@ Os benchmarks `income_realism` avaliam diversidade, correspondência exata e pla
 Os resultados antigos permanecem históricos. A comparação entre baseline e v2 deve considerar frequência de caudas, p95, p99, duplicidade de combinações-base, match exato com treino e holdout, custo computacional e estabilidade entre seeds.
 
 Nenhuma recomendação de artefato neural deve ser feita por uma única média. Gates obrigatórios continuam prevalecendo sobre scores agregados.
+
+### Refinamento final da renda v3
+
+O refinamento final criou uma versão separada de calibração, `income_model_version = 3`, sem alterar `categorical_vocabulary_version = 2`. A seleção da calibração usou:
+
+- `configs/benchmark-income-v3-calibration-smoke.yaml`;
+- `configs/benchmark-income-v3-calibration.yaml`;
+- seeds de seleção `41`, `42` e `43`;
+- versões comparadas `income_v1`, `income_v2`, `income_v3_candidate_a` e `income_v3_candidate_b`.
+
+A variante selecionada foi `income_v3_candidate_b`, registrada como `selected_calibration`. Ela busca um ponto intermediário entre a cauda ampla da v1 e a compressão observada na v2. A comparação avalia mediana, p95, p99, desvio padrão, intervalo interquartil, taxa de cauda alta, sobreposição de distribuições e inversões agregadas de ranking.
+
+### Confirmação independente da CTGAN candidate_c
+
+A CTGAN candidate_c foi congelada como perfil `ctgan_income_v3_recommended_candidate` e confirmada em seeds independentes `44`, `45` e `46`, que não foram usadas na seleção da renda. A confirmação foi executada com:
+
+- `configs/benchmark-ctgan-candidate-c-confirmation-smoke.yaml`;
+- `configs/benchmark-ctgan-candidate-c-confirmation.yaml`;
+- treino de 20.000 registros;
+- holdout de 5.000 registros;
+- 20.000 registros sintéticos por seed;
+- `income_model_version = 3`;
+- vocabulário categórico versão 2;
+- CTGAN 0.12.1, CPU, `epochs: 20`, `batch_size: 500`, `pac: 10`, `generator_lr: 0.0001` e `discriminator_lr: 0.0001`.
+
+Resultado da confirmação:
+
+| Seed | Status | Tempo de treino | Tempo de geração | Wasserstein norm. renda | KS renda | Dif. correlação | Duplicidade-base | Match treino | Pico de RSS |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 44 | `approved` | 309,9 s | 50,3 s | 0,213 | 0,122 | 0,059 | 0,000 | 0,000 | 4.059 MB |
+| 45 | `approved` | 824,8 s | 42,0 s | 0,111 | 0,056 | 0,074 | 0,000 | 0,000 | 4.067 MB |
+| 46 | `approved` | 963,5 s | 43,7 s | 0,067 | 0,032 | 0,051 | 0,000 | 0,000 | 3.799 MB |
+
+As três seeds de confirmação passaram nos gates obrigatórios, sem identificadores duplicados, sem linhas finais inválidas, sem duplicidade de combinações-base e sem match exato com treino. Houve um match exato com holdout na seed `44`, interpretado como métrica de controle e não como evidência isolada de memorização.
+
+Cada run passou a persistir `raw_evaluation.json`, `final_evaluation.json` e `raw_final_comparison.json`. A confirmação mostrou validade estrutural final de 100%, mas validade bruta baixa antes do pós-processamento, reforçando que a qualidade final da CTGAN ainda depende de normalização, reparo e seleção global.
+
+O artefato `artifacts/models/ctgan/20260729T231900Z-income-v3-recommended-candidate/` foi produzido com finalidade `recommended_candidate`. Ele não é `approved`, `default` nem `production`; uma aprovação futura exige decisão explícita.
+
+### Diagnóstico da validade bruta da CTGAN income v3
+
+Depois da confirmação da CTGAN candidate_c, foi executada uma investigação estritamente diagnóstica, sem novo treinamento e sem alteração dos artefatos preservados. O relatório foi gravado em:
+
+```text
+artifacts/diagnostics/ctgan-income-v3-raw-validity-20260730T001234Z/
+```
+
+Arquivos produzidos:
+
+- `metric_semantics.json`;
+- `ctgan_income_v3_raw_validity_diagnostic.json`;
+- `ctgan_income_v3_raw_validity_by_rule.csv`;
+- `raw_rule_failure_intersections.json`;
+- `raw_rule_failure_cooccurrence.csv`;
+- `postprocessing_field_changes.json`;
+- `postprocessing_transition_summary.csv`;
+- `ctgan_income_v3_postprocessing_summary.csv`.
+
+Resumo por seed:
+
+| Seed | Validade raw global | Validade final | Validade geográfica raw | Validade profissional raw | Rejeição pós-processamento | Dependência |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 44 | 0,205% | 100,000% | 0,210% | 92,705% | 15,991% | alta |
+| 45 | 0,180% | 100,000% | 0,190% | 92,920% | 17,273% | alta |
+| 46 | 0,285% | 100,000% | 0,305% | 94,230% | 15,914% | alta |
+
+A regra mais redutora foi geográfica, principalmente `Estado × Municipio` e `Estado × DDD`. As categorias individuais foram conhecidas em 100% das linhas avaliadas, e `Ocupacao × Escolaridade` teve validade bruta de 100% nas três seeds. Isso indica que a baixa validade global bruta não decorre de vocabulário desconhecido nem de colapso profissional, mas da combinação simultânea de várias relações, com predominância das relações geográficas.
+
+Nas seeds `44` e `45`, a ocupação ausente entre as linhas selecionadas foi `Diretor`. Ela apareceu nos candidatos rejeitados ou excedentes, portanto não há evidência de remoção pelo pós-processamento. Na seed `46`, a cobertura de ocupações foi completa.
+
+A distância de Wasserstein da renda foi registrada em BRL e normalizada pelo IQR da referência. No resultado final, os valores absolutos foram R$ 434,71, R$ 238,31 e R$ 159,06 para as seeds `44`, `45` e `46`, respectivamente; os valores normalizados foram 0,203, 0,114 e 0,075.
+
+Esse diagnóstico não promove nem descarta o artefato. Ele apenas formaliza a semântica das métricas e evidencia a dependência do pós-processamento antes de qualquer decisão futura de aprovação da CTGAN.
+
+### Representação geográfica composta da CTGAN
+
+Após o diagnóstico da validade bruta, foi avaliada uma nova representação geográfica para a CTGAN. A representação histórica, `geography_model_version = 1`, tratava `Regiao`, `Estado`, `Municipio` e `DDD` como categorias independentes. A nova representação, `geography_model_version = 2`, usa a chave interna `Geo_Key` para codificar a combinação sintética permitida dessas quatro colunas.
+
+A comparação foi desenhada para isolar a mudança geográfica. O perfil `ctgan_income_v3_geo_v2_candidate` preservou os hiperparâmetros da `ctgan_income_v3_recommended_candidate` e alterou apenas a representação de treinamento das colunas geográficas. O schema externo continuou usando as 11 colunas-base canônicas.
+
+Configurações criadas:
+
+- `configs/benchmark-ctgan-income-v3-geo-v2-smoke.yaml`;
+- `configs/benchmark-ctgan-income-v3-geo-v2-confirmation.yaml`.
+
+O smoke foi concluído com `benchmark_id` `ctgan-income-v3-geo-v2-smoke-20260730T012656Z-5724437d`. A confirmação independente foi concluída com `benchmark_id` `ctgan-income-v3-geo-v2-confirmation-20260730T012716Z-d44f6686`, usando seeds `47`, `48` e `49`, treino de 20.000 registros, holdout de 5.000 registros e 20.000 registros sintéticos por seed.
+
+| Seed | Status | Validade geográfica raw | Validade global raw | Validade profissional raw | Cobertura de `Geo_Key` | Duplicidade-base | Match treino | Pico RSS |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 47 | `approved` | 100,00% | 91,56% | 91,59% | 100,00% | 0,000 | 0,000 | 3.972 MB |
+| 48 | `approved` | 100,00% | 94,84% | 94,90% | 100,00% | 0,000 | 0,000 | 4.064 MB |
+| 49 | `approved` | 100,00% | 96,85% | 96,85% | 100,00% | 0,000 | 0,000 | 4.040 MB |
+
+A validade geográfica raw subiu de 0,19%-0,31% na representação independente para 100% com `Geo_Key`. A validade global raw subiu de 0,18%-0,29% para 91,56%-96,85%. Os quality gates obrigatórios passaram nas três seeds, sem duplicidade de identificadores, sem linhas finais inválidas, sem duplicidade-base e sem correspondência exata com treino.
+
+A diversidade geográfica também foi monitorada. A cobertura de estados, municípios e DDDs foi 100% nas três seeds. A TVD de `Geo_Key` ficou entre 0,098 e 0,111; portanto, a chave composta resolveu a coerência bruta, mas não deve ser interpretada como garantia de distribuição geográfica perfeita.
+
+O resumo de pós-processamento geográfico mostrou que as 20.000 linhas selecionadas em cada seed permaneceram geograficamente inalteradas. Não houve reparo, substituição ou rejeição por geografia; as alterações restantes ocorreram por outros motivos, como ajuste de domínios numéricos e relações profissionais:
+
+| Seed | Geografia inalterada | Geografia reparada | Geografia substituída | Rejeição por geografia | Alterações por outros motivos |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 47 | 20.000 | 0 | 0 | 0 | 1.689 |
+| 48 | 20.000 | 0 | 0 | 0 | 1.033 |
+| 49 | 20.000 | 0 | 0 | 0 | 631 |
+
+Artefato candidato produzido:
+
+```text
+artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/
+```
+
+Finalidade: `recommended_candidate`. Esse status não representa `approved`, `default` ou `production`.
+
+### Aprovação técnica após revisão de governança
+
+Na revisão final, as evidências do benchmark `ctgan-income-v3-geo-v2-confirmation-20260730T012716Z-d44f6686` foram validadas programaticamente antes da alteração de status. O candidato original foi preservado, e uma cópia promovida foi criada em:
+
+```text
+artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/
+```
+
+A cópia aprovada contém `approval_manifest.json`, `manifest.before-approval.json` e `training_manifest.before-approval.json`. O manifesto de treinamento passou a registrar `purpose = approved`, `approval_status = approved`, `recommended_for_neural_generation = true` e `general_platform_default = false`.
+
+Critérios verificados:
+
+- três seeds de confirmação concluídas e `approved`;
+- versões `categorical_vocabulary_version = 2`, `income_model_version = 3` e `geography_model_version = 2`;
+- checksum geográfico válido;
+- `Geo_Key` ausente no schema externo;
+- validade geográfica raw de 100%;
+- validade global raw entre 91,56% e 96,85%;
+- zero linhas finais inválidas;
+- zero identificadores duplicados;
+- zero duplicidade-base;
+- zero correspondência exata com treino;
+- cobertura de estados, municípios, DDDs e `Geo_Key` de 100%.
+
+Limitação ocupacional preservada: seeds `47` e `49` cobriram 37/37 ocupações; a seed `48` cobriu 36/37, com ausência de `Diretor`, uma categoria rara. Essa ausência isolada não representa colapso geral, mas continua registrada como limitação.
+
+A aprovação é técnica e interna. Ela não constitui certificação externa, garantia de anonimização, validação populacional oficial, status `production` ou escolha do modelo padrão geral da plataforma.

@@ -89,4 +89,39 @@ A avaliação de privacidade e diversidade passou a distinguir duplicidade de co
 
 A renda também passou a ser avaliada por grupos condicionais de ocupação, escolaridade, faixa etária e região. O `income_model_version` registra a versão da calibração sintética de renda separadamente da versão do vocabulário categórico.
 
+O `income_model_version = 3` refinou exclusivamente parâmetros de dispersão e cauda da renda. Ele não altera escolaridades permitidas, pesos das ocupações, idade mínima, região, gênero, dependentes, estado civil, municípios ou o vocabulário categórico. A seleção da calibração usou seeds `41`, `42` e `43`; a confirmação da CTGAN candidate_c usou seeds independentes `44`, `45` e `46`.
+
+Nos benchmarks de confirmação, as métricas são persistidas em dois estágios. `raw_evaluation.json` descreve a amostra das colunas-base antes de normalização final e pós-processamento. `final_evaluation.json` descreve o dataset exportável depois de reparo, seleção global e validação estrutural. `raw_final_comparison.json` resume a dependência do pós-processamento, incluindo validade estrutural bruta e final, taxa de reparo, taxa de rejeição e mudanças de distribuição.
+
 As métricas são diagnósticas: apoiam avaliação de risco e qualidade, mas não garantem anonimização absoluta nem representatividade da população brasileira. Detalhes estão em `docs/privacy-and-diversity.md` e `docs/income-realism.md`.
+
+### Diagnóstico de validade bruta por regra
+
+A investigação da CTGAN income v3 `recommended_candidate` adicionou uma camada diagnóstica sem alterar treinamento, pós-processamento, quality gates ou artefatos históricos. O objetivo é separar o que foi aprendido pela amostra bruta do que foi corrigido pelo pipeline.
+
+As taxas possuem denominadores explícitos:
+
+- `raw_structural_validity_rate`: linhas brutas selecionadas válidas divididas pelas linhas brutas selecionadas.
+- `final_structural_validity_rate`: linhas finais válidas divididas pelas linhas finais selecionadas.
+- `postprocessing_repair_rate`: ganho positivo de validade estrutural entre `raw` e `final`, calculado sobre as linhas selecionadas.
+- `postprocessing_rejection_rate`: candidatos inválidos depois do pós-processamento e da validação global, divididos por todos os candidatos pós-processados nos batches.
+- `candidate_acceptance_rate`: candidatos aceitos por regras locais de batch, divididos por todos os candidatos gerados.
+- `global_acceptance_rate`: candidatos aceitos pela validação global, divididos por todos os candidatos gerados.
+
+O diagnóstico também separa `repair`, `replacement` e `rejection`. `repair` indica ajuste de campos relacionados preservando o núcleo semântico principal da linha; `replacement` indica substituição integral de algum campo semântico central; `rejection` indica candidato não aproveitado após validação global.
+
+As regras avaliadas separadamente incluem categorias conhecidas, domínios de idade, renda e dependentes, relações `Regiao × Estado`, `Estado × Municipio`, `Estado × DDD`, `Ocupacao × Escolaridade`, `Ocupacao × Idade`, `Estado_Civil × Idade`, validade geográfica conjunta, validade profissional conjunta, validade não relacional e validade estrutural global.
+
+A validade global bruta é a interseção das regras. Por isso, ela pode ser muito menor do que a validade de cada bloco isolado. Na CTGAN income v3, categorias individuais e relações profissionais tiveram alta validade, enquanto as relações geográficas conjuntas concentraram as falhas brutas.
+
+### Representação geográfica neural
+
+A representação histórica da CTGAN, `geography_model_version = 1`, treinava `Regiao`, `Estado`, `Municipio` e `DDD` como colunas independentes. Como essas colunas formam uma hierarquia, o modelo podia produzir valores conhecidos em combinações incompatíveis.
+
+A nova representação `geography_model_version = 2` usa a coluna interna `Geo_Key`, derivada deterministicamente das fontes canônicas `REGION_STATES`, `STATE_MUNICIPALITIES` e `STATE_DDDS`. Durante o treinamento da CTGAN, `Geo_Key` substitui as quatro colunas geográficas; depois da amostragem, a chave é validada, decodificada e removida da saída pública. O contrato externo das 11 colunas-base permanece inalterado.
+
+O catálogo atual contém 201 chaves e checksum `0b12f8466842767c637a37cbff3939d730c1a06c87770c0846cfdeebd8ccf033`. Como a fonte local relaciona DDDs permitidos por estado, a chave representa combinações sintéticas permitidas pelo projeto, não uma validação oficial de DDD por município.
+
+O perfil `ctgan_income_v3_geo_v2_candidate` preserva os hiperparâmetros da CTGAN candidate_c e altera apenas a representação geográfica neural. A confirmação nas seeds `47`, `48` e `49` mostrou validade geográfica bruta de 100%, cobertura completa de `Geo_Key`, zero duplicidade-base e zero correspondência exata com treino.
+
+Após revisão final de governança, uma cópia do candidato foi aprovada como artefato neural recomendado em `artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/`. Essa aprovação não altera hiperparâmetros, renda, vocabulário, geografia, quality gates ou benchmarks históricos. Ela também não torna a CTGAN o padrão geral da plataforma: o `ProgrammaticSynthesizer` permanece como padrão geral, a CTGAN aprovada é a opção neural recomendada e a GAN simples permanece experimental.

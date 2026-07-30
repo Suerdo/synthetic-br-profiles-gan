@@ -13,6 +13,19 @@ import pandas as pd
 
 from synthetic_br_profiles_gan.calibration import coerce_model_dtypes
 from synthetic_br_profiles_gan.config import ConfigDict
+from synthetic_br_profiles_gan.domain.geography import (
+    GEO_KEY_COLUMN,
+    GEOGRAPHY_CATALOG_VERSION,
+    GEOGRAPHY_MODEL_VERSION,
+    LEGACY_GEOGRAPHY_MODEL_VERSION,
+    build_geography_catalog,
+    decode_geography_frame,
+    encode_geography_frame,
+    geography_catalog_checksum,
+    geography_catalog_records,
+    geography_v2_metadata,
+    validate_geography_mapping,
+)
 from synthetic_br_profiles_gan.exceptions import ModelBackendUnavailable, ModelSerializationError, SyntheticModelError
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 from synthetic_br_profiles_gan.utils.reproducibility import set_global_seed
@@ -35,6 +48,7 @@ DEFAULT_CTGAN_CONFIG: ConfigDict = {
     "discriminator_steps": None,
     "log_frequency": None,
     "pac": None,
+    "geography_model_version": LEGACY_GEOGRAPHY_MODEL_VERSION,
 }
 
 CTGAN_OPTIONAL_KWARGS = {
@@ -59,9 +73,13 @@ class CTGANSynthesizer:
     def __init__(self, config: ConfigDict | None = None) -> None:
         self.config = {**DEFAULT_CTGAN_CONFIG, **(config or {})}
         self.metadata: DatasetMetadata = default_metadata()
+        self.training_metadata: DatasetMetadata = self.metadata
         self.model: Any | None = None
         self.discrete_columns: list[str] = []
         self.library_version: str | None = None
+        self.geography_model_version = int(self.config.get("geography_model_version", LEGACY_GEOGRAPHY_MODEL_VERSION))
+        self.geography_catalog_version: int | None = None
+        self.geography_catalog_checksum: str | None = None
 
     @staticmethod
     def _ctgan_class():
@@ -79,9 +97,22 @@ class CTGANSynthesizer:
         set_global_seed(int(self.config.get("seed", 41)), seed_tensorflow=False, seed_torch=True)
         CTGAN = self._ctgan_class()
         self.metadata = metadata
-        self.discrete_columns = metadata.categorical_columns(include_discrete_numeric=True)
+        self.geography_model_version = int(self.config.get("geography_model_version", LEGACY_GEOGRAPHY_MODEL_VERSION))
+        if self.geography_model_version == GEOGRAPHY_MODEL_VERSION:
+            mapping = validate_geography_mapping()
+            if not mapping["is_valid"]:
+                raise SyntheticModelError("Invalid geography catalog for CTGAN geography_model_version=2.")
+            self.training_metadata = geography_v2_metadata(metadata)
+            self.geography_catalog_version = GEOGRAPHY_CATALOG_VERSION
+            self.geography_catalog_checksum = geography_catalog_checksum()
+            train = coerce_model_dtypes(encode_geography_frame(data[metadata.model_columns]), self.training_metadata)
+        elif self.geography_model_version == LEGACY_GEOGRAPHY_MODEL_VERSION:
+            self.training_metadata = metadata
+            train = coerce_model_dtypes(data[metadata.model_columns], metadata)
+        else:
+            raise SyntheticModelError(f"Unsupported CTGAN geography_model_version: {self.geography_model_version}")
+        self.discrete_columns = self.training_metadata.categorical_columns(include_discrete_numeric=True)
         self.library_version = importlib.metadata.version("ctgan")
-        train = coerce_model_dtypes(data[metadata.model_columns], metadata)
         model_kwargs = _ctgan_constructor_kwargs(CTGAN, self.config)
         self.model = CTGAN(**model_kwargs)
         self.model.fit(train, self.discrete_columns)
@@ -91,7 +122,10 @@ class CTGANSynthesizer:
         if self.model is None:
             raise SyntheticModelError("CTGANSynthesizer must be fitted or loaded before sampling.")
         sampled = self.model.sample(int(num_rows))
-        sampled = sampled[self.metadata.model_columns]
+        if self.geography_model_version == GEOGRAPHY_MODEL_VERSION:
+            sampled = decode_geography_frame(sampled)
+        else:
+            sampled = sampled[self.metadata.model_columns]
         return coerce_model_dtypes(sampled, self.metadata)
 
     def save(self, output_path: Path) -> None:
@@ -102,11 +136,31 @@ class CTGANSynthesizer:
         with (output_path / "model.pkl").open("wb") as file:
             pickle.dump(self.model, file)
         self.metadata.save(output_path / "metadata.json")
+        if self.geography_model_version == GEOGRAPHY_MODEL_VERSION:
+            self.training_metadata.save(output_path / "metadata_ctgan_internal.json")
+            with (output_path / "geography_catalog.json").open("w", encoding="utf-8") as file:
+                json.dump(
+                    {
+                        "geography_model_version": GEOGRAPHY_MODEL_VERSION,
+                        "geography_catalog_version": GEOGRAPHY_CATALOG_VERSION,
+                        "checksum": geography_catalog_checksum(),
+                        "entries": geography_catalog_records(),
+                    },
+                    file,
+                    ensure_ascii=False,
+                    indent=2,
+                )
         payload = {
             "config": self.config,
             "discrete_columns": self.discrete_columns,
             "library": "ctgan",
             "library_version": self.library_version or importlib.metadata.version("ctgan"),
+            "geography_model_version": int(self.geography_model_version),
+            "geography_catalog_version": self.geography_catalog_version,
+            "geography_catalog_checksum": self.geography_catalog_checksum,
+            "external_model_columns": list(self.metadata.model_columns),
+            "training_model_columns": list(self.training_metadata.model_columns),
+            "geo_key_column": GEO_KEY_COLUMN if self.geography_model_version == GEOGRAPHY_MODEL_VERSION else None,
         }
         with (output_path / "metadata_ctgan.json").open("w", encoding="utf-8") as file:
             json.dump(payload, file, ensure_ascii=False, indent=2)
@@ -122,6 +176,15 @@ class CTGANSynthesizer:
             instance.discrete_columns = list(payload.get("discrete_columns", []))
             instance.library_version = payload.get("library_version")
             instance.metadata = DatasetMetadata.load(input_path / "metadata.json")
+            instance.geography_model_version = int(payload.get("geography_model_version", LEGACY_GEOGRAPHY_MODEL_VERSION))
+            instance.geography_catalog_version = payload.get("geography_catalog_version")
+            instance.geography_catalog_checksum = payload.get("geography_catalog_checksum")
+            if instance.geography_model_version == GEOGRAPHY_MODEL_VERSION:
+                _validate_saved_geography_catalog(input_path, payload)
+                internal_path = input_path / "metadata_ctgan_internal.json"
+                instance.training_metadata = DatasetMetadata.load(internal_path) if internal_path.exists() else geography_v2_metadata(instance.metadata)
+            else:
+                instance.training_metadata = instance.metadata
             with (input_path / "model.pkl").open("rb") as file:
                 instance.model = pickle.load(file)
             return instance
@@ -154,3 +217,22 @@ def _ctgan_constructor_kwargs(ctgan_class: Any, config: ConfigDict) -> dict[str,
     if accepts_var_kwargs:
         return kwargs
     return {key: value for key, value in kwargs.items() if key in supported}
+
+
+def _validate_saved_geography_catalog(input_path: Path, payload: dict[str, Any]) -> None:
+    expected_checksum = geography_catalog_checksum()
+    if payload.get("geography_catalog_checksum") != expected_checksum:
+        raise ModelSerializationError(
+            "Saved CTGAN geography catalog checksum is incompatible with the current deterministic catalog."
+        )
+    catalog_path = input_path / "geography_catalog.json"
+    if not catalog_path.exists():
+        raise ModelSerializationError("Missing geography_catalog.json for CTGAN geography_model_version=2.")
+    with catalog_path.open(encoding="utf-8") as file:
+        catalog_payload = json.load(file)
+    if catalog_payload.get("checksum") != expected_checksum:
+        raise ModelSerializationError("geography_catalog.json checksum does not match the current deterministic catalog.")
+    keys = {entry.get("geo_key") for entry in catalog_payload.get("entries", []) if isinstance(entry, dict)}
+    expected_keys = {entry.geo_key for entry in build_geography_catalog()}
+    if keys != expected_keys:
+        raise ModelSerializationError("geography_catalog.json does not contain the expected Geo_Key categories.")

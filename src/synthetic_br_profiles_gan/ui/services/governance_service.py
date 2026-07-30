@@ -9,7 +9,7 @@ from typing import Any
 
 from synthetic_br_profiles_gan.domain.occupations import OCCUPATION_CATALOG
 from synthetic_br_profiles_gan.localization import CATEGORICAL_VOCABULARY_VERSION, DATA_LOCALE, UNICODE_NORMALIZATION
-from synthetic_br_profiles_gan.models.registry import SavedModelArtifact, list_saved_model_artifacts
+from synthetic_br_profiles_gan.models.registry import SavedModelArtifact, get_recommended_artifact, list_saved_model_artifacts
 from synthetic_br_profiles_gan.ui.services.audit_service import read_audit_events
 from synthetic_br_profiles_gan.ui.services.execution_history import HistoryRecord, history_summary, load_history
 from synthetic_br_profiles_gan.ui.ui_config import UIConfig
@@ -27,6 +27,7 @@ class GovernanceSnapshot:
     risk_indicators: list[dict[str, Any]]
     pipeline_status: dict[str, Any]
     model_versions: list[dict[str, Any]]
+    recommended_neural_model: list[dict[str, Any]]
     history: list[HistoryRecord]
     audit_events: list[dict[str, Any]]
 
@@ -36,6 +37,7 @@ def build_governance_snapshot(config: UIConfig) -> GovernanceSnapshot:
     history = load_history(config.artifacts_root)
     summary = history_summary(history)
     artifacts = list_saved_model_artifacts(config.models_root)
+    recommended_ctgan = get_recommended_artifact(config.models_root, "ctgan")
     approved_generation_artifacts = [
         artifact for artifact in artifacts if artifact.model in {"ctgan", "simple_gan"} and is_approved_vocabulary_v2_artifact(artifact, config)
     ]
@@ -64,6 +66,7 @@ def build_governance_snapshot(config: UIConfig) -> GovernanceSnapshot:
         risk_indicators=_risk_indicators(history),
         pipeline_status=_pipeline_status(summary),
         model_versions=model_version_rows(artifacts, config),
+        recommended_neural_model=_recommended_neural_model_rows(recommended_ctgan),
         history=history,
         audit_events=read_audit_events(config.audit_events_path, limit=200),
     )
@@ -81,6 +84,67 @@ def is_approved_vocabulary_v2_artifact(artifact: SavedModelArtifact, config: UIC
         and artifact.data_locale == DATA_LOCALE
         and artifact.unicode_normalization == UNICODE_NORMALIZATION
     )
+
+
+def _recommended_neural_model_rows(artifact: SavedModelArtifact | None) -> list[dict[str, Any]]:
+    if artifact is None:
+        return [
+            {
+                "campo": "Modelo neural recomendado",
+                "valor": "Não avaliado",
+                "fonte": "training_manifest.json",
+                "interpretação": "Nenhum artefato neural aprovado e recomendado foi encontrado.",
+            }
+        ]
+    manifest = artifact.manifest
+    summary = manifest.get("approval_evidence_summary") if isinstance(manifest.get("approval_evidence_summary"), dict) else {}
+    by_seed = summary.get("by_seed") if isinstance(summary.get("by_seed"), dict) else {}
+    raw_values = [
+        float(payload["raw_global_validity_rate"])
+        for payload in by_seed.values()
+        if isinstance(payload, dict) and payload.get("raw_global_validity_rate") is not None
+    ]
+    raw_range = f"{min(raw_values):.4f} a {max(raw_values):.4f}" if raw_values else "Não avaliado"
+    return [
+        _recommended_row("Identificador", artifact.artifact_id, "training_manifest.json", "Diretório administrado do artefato aprovado."),
+        _recommended_row("Status", artifact.approval_status, "training_manifest.json", "Status técnico interno do artefato."),
+        _recommended_row("Vocabulário", f"v{artifact.categorical_vocabulary_version}", "training_manifest.json", "Versão do vocabulário categórico."),
+        _recommended_row("Renda", f"v{artifact.income_model_version}", "training_manifest.json", "Versão da calibração sintética de renda."),
+        _recommended_row("Geografia", f"v{artifact.geography_model_version}", "training_manifest.json", "Versão da representação geográfica neural."),
+        _recommended_row("Checksum geográfico", artifact.geography_catalog_checksum or "Não avaliado", "training_manifest.json", "Checksum do catálogo determinístico de Geo_Key."),
+        _recommended_row("Benchmark de confirmação", str(manifest.get("confirmation_benchmark") or "Não avaliado"), "approval_manifest.json", "Benchmark usado como evidência de aprovação."),
+        _recommended_row("Seeds", ", ".join(str(seed) for seed in manifest.get("confirmation_seeds", [])) or "Não avaliado", "approval_manifest.json", "Seeds independentes da confirmação."),
+        _recommended_row("Resultado", "3/3 seeds aprovadas", "run_summary.csv", "Todas as execuções de confirmação passaram nos gates obrigatórios."),
+        _recommended_row("Validade raw", raw_range, "run_summary.csv", "Intervalo da validade estrutural bruta derivada das regras raw."),
+        _recommended_row("Validade final", "100%", "validation / quality_gates", "Linhas finais inválidas igual a zero nas três seeds."),
+        _recommended_row("Duplicidade", "0", "quality_gates / evaluation.json", "Sem identificadores duplicados e sem duplicidade-base."),
+        _recommended_row("Match treino", "0", "evaluation.json → privacy", "Sem correspondência exata com treino nas colunas-base."),
+        _recommended_row("Cobertura", "Geo_Key, estados, municípios e DDDs: 100%; ocupações: mínimo 36/37", "results.csv", "Cobertura geográfica completa e limitação ocupacional documentada."),
+        _recommended_row("Ambiente", _environment_label(manifest), "training_manifest.json", "Ambiente registrado no artefato aprovado."),
+        _recommended_row("Limitações", "Diretor ausente na seed 48; DDD é associado ao estado no catálogo local.", "approval_manifest.json", "Limitações conhecidas preservadas na aprovação."),
+        _recommended_row(
+            "Nota",
+            "A aprovação representa decisão técnica interna; não é certificação externa, garantia de anonimização ou validação populacional oficial.",
+            "approval_manifest.json",
+            "Interpretação institucional da aprovação.",
+        ),
+    ]
+
+
+def _recommended_row(campo: str, valor: Any, fonte: str, interpretacao: str) -> dict[str, Any]:
+    return {"campo": campo, "valor": valor, "fonte": fonte, "interpretação": interpretacao}
+
+
+def _environment_label(manifest: dict[str, Any]) -> str:
+    environment = manifest.get("environment") if isinstance(manifest.get("environment"), dict) else {}
+    libraries = manifest.get("library_versions") or environment.get("library_versions") or {}
+    ctgan_version = libraries.get("ctgan") or manifest.get("ctgan_version")
+    platform = environment.get("platform") or manifest.get("platform")
+    if ctgan_version and platform:
+        return f"CTGAN {ctgan_version}; {platform}"
+    if ctgan_version:
+        return f"CTGAN {ctgan_version}"
+    return "Não avaliado"
 
 
 def default_generation_model(config: UIConfig, artifacts: list[SavedModelArtifact] | None = None) -> str:

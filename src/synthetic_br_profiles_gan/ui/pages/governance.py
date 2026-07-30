@@ -31,6 +31,18 @@ def render_governance_page(st: Any, config: UIConfig, snapshot: GovernanceSnapsh
     with st.container(border=True):
         _render_governance_section_header(
             st,
+            "Modelo Neural Recomendado",
+            "Fonte: training_manifest.json, approval_manifest.json, run_summary.csv e results.csv.",
+        )
+        st.dataframe(snapshot.recommended_neural_model, use_container_width=True)
+        st.caption(
+            "A aprovação representa uma decisão interna baseada nos critérios técnicos do projeto. "
+            "Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial."
+        )
+
+    with st.container(border=True):
+        _render_governance_section_header(
+            st,
             "Qualidade dos Dados",
             "Fonte: manifesto de execução, validation.json e quality_gates.json quando disponíveis.",
         )

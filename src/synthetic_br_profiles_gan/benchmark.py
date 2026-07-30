@@ -33,6 +33,10 @@ from synthetic_br_profiles_gan.config import (
     validate_benchmark_config,
 )
 from synthetic_br_profiles_gan.evaluation.quality_gates import DEFAULT_QUALITY_GATES
+from synthetic_br_profiles_gan.evaluation.income_calibration import (
+    REQUIRED_INCOME_OCCUPATIONS,
+    run_income_calibration_analysis,
+)
 from synthetic_br_profiles_gan.evaluation.vocabulary import (
     DEFAULT_LOW_COUNT_THRESHOLD,
     DEFAULT_MINIMUM_INCOME_GROUP_COUNT,
@@ -231,6 +235,27 @@ RUN_SUMMARY_COLUMNS = [
     "unicode_nfc_valid_raw",
     "unicode_nfc_valid_final",
     "vocabulary_quality_gate_status",
+    "geography_model_version",
+    "known_geography_key_rate_raw",
+    "raw_geographic_validity_rate",
+    "final_geographic_validity_rate",
+    "raw_professional_validity_rate",
+    "final_professional_validity_rate",
+    "raw_non_relational_validity_rate",
+    "final_non_relational_validity_rate",
+    "geography_key_coverage_raw",
+    "geography_key_coverage_final",
+    "geography_key_distribution_tvd_raw",
+    "geography_key_distribution_tvd_final",
+    "state_coverage",
+    "municipality_coverage",
+    "ddd_coverage",
+    "geography_unchanged_rows",
+    "geography_modified_rows",
+    "geography_repaired_rows",
+    "geography_replaced_rows",
+    "geography_rejected_rows",
+    "other_modified_rows",
 ]
 CAPACITY_RESULT_COLUMNS = [
     "benchmark_id",
@@ -1240,11 +1265,83 @@ def _write_capacity_outputs(
     return outputs
 
 
+def run_income_calibration_benchmark(
+    config: ConfigDict,
+    started_at: datetime | None = None,
+    started_perf: float | None = None,
+) -> dict[str, Any]:
+    """Executa avaliação controlada de versões do modelo sintético de renda."""
+    started = started_at or datetime.now(timezone.utc)
+    perf_started = started_perf or time.perf_counter()
+    benchmark_id = build_benchmark_id(str(config["benchmark"]["name"]), started)
+    benchmark_dir = Path(config["outputs"]["base_directory"]) / benchmark_id
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    save_yaml_config(config, benchmark_dir / "benchmark_config.yaml")
+    calibration_config = config.get("income_calibration", {})
+    rows_per_occupation = int(calibration_config.get("rows_per_occupation", 5000))
+    occupations = tuple(calibration_config.get("occupations", REQUIRED_INCOME_OCCUPATIONS))
+    analysis = run_income_calibration_analysis(
+        seeds=[int(seed) for seed in config["benchmark"]["seeds"]],
+        rows_per_occupation=rows_per_occupation,
+        occupations=occupations,
+    )
+    summary_frame = pd.DataFrame(analysis["rows"])
+    compression_frame = pd.DataFrame(analysis["compression"])
+    overlap_frame = pd.DataFrame(analysis["overlap"])
+    ranking_frame = pd.DataFrame(analysis["ranking"])
+    outputs: dict[str, Path] = {
+        "summary_csv": benchmark_dir / "income_calibration_summary.csv",
+        "summary_parquet": benchmark_dir / "income_calibration_summary.parquet",
+        "compression_csv": benchmark_dir / "income_calibration_compression.csv",
+        "overlap_csv": benchmark_dir / "income_calibration_overlap.csv",
+        "ranking_csv": benchmark_dir / "income_calibration_ranking.csv",
+    }
+    summary_frame.to_csv(outputs["summary_csv"], index=False, encoding="utf-8-sig")
+    summary_frame.to_parquet(outputs["summary_parquet"], index=False)
+    compression_frame.to_csv(outputs["compression_csv"], index=False, encoding="utf-8-sig")
+    overlap_frame.to_csv(outputs["overlap_csv"], index=False, encoding="utf-8-sig")
+    ranking_frame.to_csv(outputs["ranking_csv"], index=False, encoding="utf-8-sig")
+    outputs["analysis_json"] = write_json(analysis, benchmark_dir / "income_calibration_analysis.json")
+    ended = datetime.now(timezone.utc)
+    duration_seconds = float(time.perf_counter() - perf_started)
+    outputs["benchmark_manifest"] = write_json(
+        _benchmark_manifest(
+            benchmark_id=benchmark_id,
+            config=config,
+            started_at=started,
+            ended_at=ended,
+            duration_seconds=duration_seconds,
+            expected_runs=len(config["benchmark"]["seeds"]) * len(occupations) * 4,
+            completed_runs=len(config["benchmark"]["seeds"]) * len(occupations) * 4,
+            failed_runs=0,
+            status="completed",
+            artifact_paths={**outputs, "benchmark_config": benchmark_dir / "benchmark_config.yaml"},
+        ),
+        benchmark_dir / "benchmark_manifest.json",
+    )
+    return {
+        "benchmark_id": benchmark_id,
+        "benchmark_dir": benchmark_dir,
+        "status": "completed",
+        "completed_runs": len(config["benchmark"]["seeds"]) * len(occupations) * 4,
+        "failed_runs": 0,
+        "outputs": outputs,
+        "summary": {
+            "selected_calibration": analysis["selected_calibration"],
+            "versions": sorted({row["version_name"] for row in analysis["rows"]}),
+            "occupations": list(occupations),
+            "seeds": list(config["benchmark"]["seeds"]),
+        },
+    }
+
+
 def run_benchmark(config: ConfigDict | None = None) -> dict[str, Any]:
     """Executa o benchmark e grava artefatos no nível do benchmark."""
     started = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     effective = resolve_benchmark_config(config)
+    if effective["benchmark"].get("type") == "income_calibration":
+        return run_income_calibration_benchmark(effective, started_at=started, started_perf=started_perf)
     if effective["benchmark"].get("type") == "capacity":
         return run_capacity_benchmark(effective, started_at=started, started_perf=started_perf)
     benchmark_id = build_benchmark_id(str(effective["benchmark"]["name"]), started)
@@ -1908,6 +2005,8 @@ def _sample_raw_synthesizer_output(
         from synthetic_br_profiles_gan.models.ctgan import CTGANSynthesizer
 
         synthesizer = CTGANSynthesizer.load(model_path)
+        if getattr(synthesizer, "geography_model_version", 1) == 2:
+            return synthesizer.sample(int(rows))
         if getattr(synthesizer, "model", None) is not None:
             sampled = synthesizer.model.sample(int(rows))
             return sampled[[column for column in metadata.model_columns if column in sampled.columns]].copy()
@@ -1952,6 +2051,11 @@ def summarize_run(
     exact_matches = privacy.get("exact_matches") if isinstance(privacy.get("exact_matches"), dict) else {}
     exact_train = exact_matches.get("train") if isinstance(exact_matches.get("train"), dict) else {}
     exact_holdout = exact_matches.get("holdout") if isinstance(exact_matches.get("holdout"), dict) else {}
+    geography = evaluation.get("geography", {}) if isinstance(evaluation.get("geography"), dict) else {}
+    geography_validity = geography.get("validity", {}) if isinstance(geography.get("validity"), dict) else {}
+    geography_diversity = geography.get("diversity", {}) if isinstance(geography.get("diversity"), dict) else {}
+    raw_final = result.get("raw_final_comparison", {}) if isinstance(result.get("raw_final_comparison"), dict) else {}
+    postprocessing_geography = raw_final.get("postprocessing_geography", {}) if isinstance(raw_final.get("postprocessing_geography"), dict) else {}
     return {
         "benchmark_id": benchmark_id,
         "run_id": result["run_id"],
@@ -2024,6 +2128,30 @@ def summarize_run(
         "unicode_nfc_valid_raw": locale.get("unicode_nfc_valid_raw"),
         "unicode_nfc_valid_final": locale.get("unicode_nfc_valid_final"),
         "vocabulary_quality_gate_status": vocabulary_gates.get("status"),
+        "geography_model_version": manifest.get("geography_model_version"),
+        "raw_structural_validity_rate": raw_final.get("raw_structural_validity_rate"),
+        "final_structural_validity_rate": raw_final.get("final_structural_validity_rate"),
+        "known_geography_key_rate_raw": raw_final.get("known_geography_key_rate_raw"),
+        "raw_geographic_validity_rate": raw_final.get("raw_geographic_validity_rate"),
+        "final_geographic_validity_rate": raw_final.get("final_geographic_validity_rate") or geography_validity.get("raw_geographic_validity_rate"),
+        "raw_professional_validity_rate": raw_final.get("raw_professional_validity_rate"),
+        "final_professional_validity_rate": raw_final.get("final_professional_validity_rate"),
+        "raw_non_relational_validity_rate": raw_final.get("raw_non_relational_validity_rate"),
+        "final_non_relational_validity_rate": raw_final.get("final_non_relational_validity_rate"),
+        "geography_key_coverage_raw": raw_final.get("geography_key_coverage_raw"),
+        "geography_key_coverage_final": raw_final.get("geography_key_coverage_final") or geography_diversity.get("geography_key_coverage"),
+        "geography_key_distribution_tvd_raw": raw_final.get("geography_key_distribution_tvd_raw"),
+        "geography_key_distribution_tvd_final": raw_final.get("geography_key_distribution_tvd_final")
+        or geography_diversity.get("geography_key_distribution_tvd"),
+        "state_coverage": geography_diversity.get("state_coverage"),
+        "municipality_coverage": geography_diversity.get("municipality_coverage"),
+        "ddd_coverage": geography_diversity.get("ddd_coverage"),
+        "geography_unchanged_rows": postprocessing_geography.get("geography_unchanged_rows"),
+        "geography_modified_rows": postprocessing_geography.get("geography_modified_rows"),
+        "geography_repaired_rows": postprocessing_geography.get("geography_repaired_rows"),
+        "geography_replaced_rows": postprocessing_geography.get("geography_replaced_rows"),
+        "geography_rejected_rows": postprocessing_geography.get("geography_rejected_rows"),
+        "other_modified_rows": postprocessing_geography.get("other_modified_rows"),
     }
 
 
@@ -2146,6 +2274,58 @@ def flatten_run_metrics(
     add("privacy", "nndr_train_mean", None, nndr.get("mean"))
     add("privacy", "columns_used", None, len(privacy.get("columns_used", [])), details=privacy.get("columns_used", []))
     add("privacy", "columns_excluded", None, len(privacy.get("excluded_columns", [])), details=privacy.get("excluded_columns", []))
+
+    geography = evaluation.get("geography", {}) if isinstance(evaluation.get("geography"), dict) else {}
+    for section_name in ["validity", "diversity"]:
+        section = geography.get(section_name, {}) if isinstance(geography.get(section_name), dict) else {}
+        for metric_name, value in section.items():
+            if isinstance(value, (dict, list, tuple)):
+                add("geography", metric_name, section_name, None, details=value)
+            else:
+                add("geography", metric_name, section_name, value)
+    relational = evaluation.get("relational_validity", {}) if isinstance(evaluation.get("relational_validity"), dict) else {}
+    for section_name in ["validity", "invalid_counts", "top_invalid_combinations"]:
+        section = relational.get(section_name, {}) if isinstance(relational.get(section_name), dict) else {}
+        for metric_name, value in section.items():
+            if isinstance(value, (dict, list, tuple)):
+                add("relational_validity", metric_name, section_name, None, details=value)
+            else:
+                add("relational_validity", metric_name, section_name, value)
+    raw_final = result.get("raw_final_comparison", {}) if isinstance(result.get("raw_final_comparison"), dict) else {}
+    for metric_name in [
+        "known_geography_key_rate_raw",
+        "known_geography_key_rate_final",
+        "raw_geographic_validity_rate",
+        "final_geographic_validity_rate",
+        "raw_professional_validity_rate",
+        "final_professional_validity_rate",
+        "raw_non_relational_validity_rate",
+        "final_non_relational_validity_rate",
+        "state_municipality_valid_rate_raw",
+        "state_ddd_valid_rate_raw",
+        "region_state_valid_rate_raw",
+        "geography_key_coverage_raw",
+        "geography_key_coverage_final",
+        "geography_key_distribution_tvd_raw",
+        "geography_key_distribution_tvd_final",
+    ]:
+        add("raw_final_geography", metric_name, None, raw_final.get(metric_name))
+    postprocessing_geography = raw_final.get("postprocessing_geography", {}) if isinstance(raw_final.get("postprocessing_geography"), dict) else {}
+    for metric_name in [
+        "geography_unchanged_rows",
+        "geography_modified_rows",
+        "geography_repaired_rows",
+        "geography_replaced_rows",
+        "geography_rejected_rows",
+        "other_modified_rows",
+        "multiple_geography_field_change_rows",
+    ]:
+        add("postprocessing_geography", metric_name, None, postprocessing_geography.get(metric_name))
+    field_changes = postprocessing_geography.get("field_changes", {}) if isinstance(postprocessing_geography.get("field_changes"), dict) else {}
+    for column, payload in field_changes.items():
+        if isinstance(payload, dict):
+            add("postprocessing_geography", "field_modified_rows", column, payload.get("modified_rows"))
+            add("postprocessing_geography", "field_modified_rate", column, payload.get("modified_rate"))
 
     reason_counts = validation.get("reason_counts", {})
     add("validation", "invalid_rows", None, validation.get("invalid_rows"))

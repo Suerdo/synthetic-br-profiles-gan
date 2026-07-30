@@ -52,3 +52,143 @@ Eventos de cauda não incluem nomes, CPF, telefone ou documentos.
 O realismo condicional avalia se as distribuições permanecem plausíveis dentro de contextos específicos. A média isolada pode esconder caudas excessivas; por isso p95 e p99 são monitorados.
 
 Essas métricas não garantem representatividade da população brasileira, anonimização absoluta ou aderência a dados oficiais.
+
+## Modelo de renda versão 3
+
+O `income_model_version = 3` registra o refinamento conceitual da renda v2.1. A versão do vocabulário categórico permanece `categorical_vocabulary_version = 2`; a mudança é exclusiva da calibração sintética de renda.
+
+Foram comparadas quatro versões: `income_v1`, `income_v2`, `income_v3_candidate_a` e `income_v3_candidate_b`. A seleção usou as seeds `41`, `42` e `43`; a confirmação da CTGAN usou seeds independentes `44`, `45` e `46`, que não participaram da escolha da calibração.
+
+A versão selecionada foi `income_v3_candidate_b`, registrada como `selected_calibration`. Ela aumentou a dispersão em relação à v2 sem retornar à cauda excessiva da v1. Os parâmetros continuam sintéticos, configuráveis e não representam estatísticas oficiais do mercado de trabalho brasileiro.
+
+Diagnóstico controlado de `Mecânico`, com `Ensino Médio`, 48 anos, região `Sudeste` e 5.000 amostras por seed:
+
+| Versão | Mediana | P90 | P95 | P99 | Máximo | Taxa acima de R$ 10.000 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `income_v1` | 3.949 | 8.455 | 10.370 | 15.319 | 34.526 | 14,5% |
+| `income_v2` | 2.987 | 5.046 | 5.853 | 7.580 | 13.319 | 1,2% |
+| `income_v3_candidate_a` | 3.026 | 5.271 | 6.197 | 8.275 | 15.042 | 2,0% |
+| `income_v3_candidate_b` | 3.047 | 5.420 | 6.399 | 8.520 | 15.113 | 2,3% |
+
+O valor de R$ 10.000,00 é usado apenas para diagnosticar o caso observado originalmente. Ele não é teto universal nem regra de validação por ocupação.
+
+### Sobreposição e compressão
+
+A seleção da v3 considera compressão de mediana, p95, p99, desvio padrão e intervalo interquartil em relação à v1, além da mudança de sobreposição em relação à v1 e à v2. Esses indicadores são informativos: não há quality gate universal para compressão nesta etapa.
+
+O objetivo foi preservar sobreposição entre ocupações e manter extremos raros possíveis. Uma distribuição sem sobreposição seria artificialmente rígida; por outro lado, caudas muito amplas podem gerar perfis frequentes demais em regiões altas da distribuição.
+
+### Confirmação da CTGAN candidate_c
+
+A configuração CTGAN candidate_c foi congelada no perfil `ctgan_income_v3_recommended_candidate`, com `epochs: 20`, `batch_size: 500`, `generator_lr: 0.0001`, `discriminator_lr: 0.0001`, `generator_decay: 0.000001`, `discriminator_decay: 0.000001`, `discriminator_steps: 1`, `log_frequency: false` e `pac: 10`. A seed continua sendo definida por execução.
+
+A confirmação independente foi executada com `configs/benchmark-ctgan-candidate-c-confirmation.yaml`, usando `income_model_version = 3`, vocabulário 2, treino de 20.000 linhas, holdout de 5.000 linhas e 20.000 sintéticos por seed.
+
+| Seed | Status | Wasserstein norm. renda | KS renda | Duplicidade-base | Match exato com treino | Pico de RSS |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 44 | `approved` | 0,213 | 0,122 | 0,000 | 0,000 | 4.059 MB |
+| 45 | `approved` | 0,111 | 0,056 | 0,000 | 0,000 | 4.067 MB |
+| 46 | `approved` | 0,067 | 0,032 | 0,000 | 0,000 | 3.799 MB |
+
+O artefato `artifacts/models/ctgan/20260729T231900Z-income-v3-recommended-candidate/` foi criado com finalidade `recommended_candidate`. Ele não foi marcado como `approved`, `default` ou `production`.
+
+As métricas `raw_evaluation.json`, `final_evaluation.json` e `raw_final_comparison.json` permanecem separadas para mostrar quanto da qualidade final veio diretamente da amostra bruta e quanto dependeu do pós-processamento e da seleção global.
+
+## Diagnóstico da validade bruta da CTGAN income v3
+
+Foi realizada uma investigação estritamente diagnóstica do artefato `artifacts/models/ctgan/20260729T231900Z-income-v3-recommended-candidate/`, sem treinamento novo, sem alteração da configuração candidate_c e sem sobrescrever os artefatos `raw_evaluation.json`, `final_evaluation.json` ou `raw_final_comparison.json` das execuções de confirmação.
+
+Os artefatos diagnósticos foram gravados em:
+
+```text
+artifacts/diagnostics/ctgan-income-v3-raw-validity-20260730T001234Z/
+```
+
+### Semântica das taxas
+
+As métricas foram formalizadas em `metric_semantics.json`:
+
+| Métrica | Numerador | Denominador | Unidade | Estágio |
+| --- | --- | --- | --- | --- |
+| `raw_structural_validity_rate` | linhas brutas selecionadas que passam nas regras estruturais das colunas-base | linhas brutas selecionadas | taxa | `raw` |
+| `final_structural_validity_rate` | linhas finais selecionadas que passam na validação estrutural completa | linhas finais selecionadas | taxa | `final` |
+| `postprocessing_repair_rate` | ganho positivo de validade entre `final` e `raw` sobre as linhas selecionadas | linhas finais selecionadas | taxa | comparação `raw`/`final` |
+| `postprocessing_rejection_rate` | candidatos inválidos depois do pós-processamento e da validação global | candidatos pós-processados gerados em todos os batches | taxa | pós-processamento |
+| `candidate_acceptance_rate` | candidatos aceitos pelas regras locais de batch | candidatos gerados | taxa | geração em batches |
+| `global_acceptance_rate` | candidatos aceitos pela validação global | candidatos gerados | taxa | seleção global |
+
+Nesta análise, `postprocessing_repair_rate` é uma taxa histórica agregada de recuperação de validade estrutural, não uma contagem de campos modificados. Para evitar ambiguidade, o diagnóstico separa também `repair`, `replacement` e `rejection` por linha e por campo.
+
+### Validade por regra
+
+Nas seeds independentes `44`, `45` e `46`, a CTGAN preservou bem valores individuais e relações profissionais, mas aprendeu mal relações geográficas conjuntas:
+
+| Seed | Validade bruta global | Categorias conhecidas | Validade profissional | Validade geográfica | Validade não relacional | Regra dominante |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 44 | 0,205% | 100,000% | 92,705% | 0,210% | 92,325% | `Estado × Município` |
+| 45 | 0,180% | 100,000% | 92,920% | 0,190% | 92,770% | `Estado × DDD` |
+| 46 | 0,285% | 100,000% | 94,230% | 0,305% | 94,205% | `Estado × Município` |
+
+A validade global bruta é próxima de 0,2% porque ela representa a interseção de todas as regras. A regra dominante foi geográfica: a maior parte das linhas continha `Estado`, `Município` e/ou `DDD` individualmente conhecidos, mas em combinações incompatíveis.
+
+### Pós-processamento por campo
+
+Os campos mais alterados foram `Municipio`, `DDD` e `Regiao`. `Estado`, `Escolaridade`, `Ocupacao` e `Estado_Civil` não precisaram de alteração nas linhas selecionadas.
+
+| Seed | Linhas selecionadas | Linhas inalteradas | Linhas reparadas | Linhas substituídas | Linhas rejeitadas | Linhas com múltiplas alterações |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 44 | 20.000 | 41 | 19.765 | 194 | 3.930 | 19.101 |
+| 45 | 20.000 | 36 | 19.871 | 93 | 4.245 | 19.147 |
+| 46 | 20.000 | 57 | 19.691 | 252 | 3.911 | 19.054 |
+
+`repair` significa ajuste de campos relacionados preservando o núcleo semântico principal da linha. `replacement` indica substituição integral de algum campo semântico central. `rejection` indica candidato não aproveitado após validação global.
+
+### Ocupação ausente
+
+Nas seeds `44` e `45`, a ocupação ausente no resultado selecionado foi `Diretor`. Ela era rara no treino e no holdout e apareceu entre candidatos rejeitados ou excedentes, sem evidência de remoção pelo pós-processamento. Na seed `46`, nenhuma ocupação ficou ausente.
+
+### Distância de renda
+
+A distância de Wasserstein da renda passou a ser registrada em duas escalas:
+
+- `wasserstein_distance_absolute_brl`: distância absoluta em reais;
+- `wasserstein_distance_normalized`: distância normalizada pelo IQR da referência, com fallback para desvio-padrão.
+
+| Seed | Raw absoluto | Final absoluto | Raw normalizado | Final normalizado |
+| ---: | ---: | ---: | ---: | ---: |
+| 44 | R$ 446,33 | R$ 434,71 | 0,208 | 0,203 |
+| 45 | R$ 253,40 | R$ 238,31 | 0,122 | 0,114 |
+| 46 | R$ 166,22 | R$ 159,06 | 0,078 | 0,075 |
+
+### Interpretação
+
+A dependência do pós-processamento foi classificada como `alta`, com critérios explícitos: validade bruta global abaixo de 50% e taxa de linhas selecionadas com reparo próxima de 99%. Ela não foi classificada como `crítica` porque a taxa de rejeição ficou abaixo de 20%.
+
+Esse diagnóstico não promove nem descarta o artefato. Ele mostra que a CTGAN candidate_c aprendeu adequadamente categorias individuais e relações profissionais, mas depende fortemente do pós-processamento para coerência geográfica e validade estrutural final.
+
+## Refinamento geográfico da CTGAN
+
+Depois do diagnóstico de validade bruta, foi avaliada uma representação geográfica neural específica para a CTGAN. A versão histórica, `geography_model_version = 1`, treinava `Regiao`, `Estado`, `Municipio` e `DDD` como colunas categóricas independentes. Essa estratégia permitia valores conhecidos em combinações inválidas, especialmente em `Estado × Municipio` e `Estado × DDD`.
+
+A versão `geography_model_version = 2` substitui essas quatro colunas, apenas dentro do treinamento da CTGAN, por `Geo_Key`, uma chave categórica composta e determinística. A chave é decodificada logo após a amostragem e não aparece no schema externo. O perfil `ctgan_income_v3_geo_v2_candidate` preservou os hiperparâmetros da CTGAN candidate_c e alterou somente essa representação geográfica.
+
+Configurações executadas:
+
+- `configs/benchmark-ctgan-income-v3-geo-v2-smoke.yaml`;
+- `configs/benchmark-ctgan-income-v3-geo-v2-confirmation.yaml`.
+
+A confirmação independente usou seeds `47`, `48` e `49`, treino de 20.000 registros, holdout de 5.000 registros e 20.000 registros sintéticos por seed. As três execuções foram `approved` nos gates obrigatórios.
+
+| Seed | Validade geográfica raw | Validade global raw | TVD de `Geo_Key` | Cobertura de ocupações | Wasserstein renda norm. | Duplicidade-base | Match treino |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 47 | 100,00% | 91,56% | 0,104 | 100,00% | 0,087 | 0,000 | 0,000 |
+| 48 | 100,00% | 94,84% | 0,098 | 97,30% | 0,190 | 0,000 | 0,000 |
+| 49 | 100,00% | 96,85% | 0,111 | 100,00% | 0,259 | 0,000 | 0,000 |
+
+Na seed `48`, a ocupação ausente foi `Diretor`, uma categoria rara. Não houve categorias finais desconhecidas nem incompatibilidades finais de ocupação com escolaridade ou idade.
+
+O pós-processamento geográfico deixou de ser necessário nas linhas selecionadas: em cada seed, as 20.000 linhas permaneceram com geografia inalterada, sem reparo, substituição ou rejeição por geografia. Ainda ocorreram alterações por outros motivos, principalmente regras numéricas e profissionais, em 1.689, 1.033 e 631 linhas nas seeds `47`, `48` e `49`, respectivamente.
+
+O artefato gerado em `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` possui finalidade `recommended_candidate` e permanece preservado como candidato histórico. Após revisão final de governança, foi criada uma cópia aprovada em `artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/`.
+
+A aprovação registra `recommended_for_neural_generation = true` e `general_platform_default = false`. Portanto, a CTGAN passa a ter um artefato neural recomendado, mas o modelo programático continua sendo o padrão geral para geração rápida e controlada. A GAN simples permanece como baseline experimental.

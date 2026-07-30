@@ -198,25 +198,35 @@ def _render_artifact_details(st: Any, artifact: Any) -> None:
     status = artifact_status_label(artifact)
     tone = {
         "Aprovado": "success",
+        "Candidato recomendado": "candidate",
         "Candidato": "candidate",
         "Experimental": "warning",
         "Smoke": "smoke",
         "Legado": "legacy",
     }.get(status, "muted")
     st.markdown(badge_html(status, tone), unsafe_allow_html=True)
-    st.caption(
-        " · ".join(
-            [
-                f"Artefato: `{artifact.artifact_id}`",
-                f"schema {artifact.schema_version}",
-                f"vocabulário {artifact.categorical_vocabulary_version}",
-                f"{artifact.data_locale or 'localidade não registrada'}",
-                f"{artifact.unicode_normalization or 'normalização não registrada'}",
-                f"seed {artifact.seed}" if artifact.seed is not None else "seed não registrada",
-                f"treino {artifact.train_rows}" if artifact.train_rows is not None else "treino não registrado",
-            ]
+    manifest = artifact.manifest if isinstance(getattr(artifact, "manifest", None), dict) else {}
+    library_versions = manifest.get("library_versions") or manifest.get("environment", {}).get("library_versions", {})
+    ctgan_version = library_versions.get("ctgan") or manifest.get("ctgan_version")
+    details = [
+        f"Artefato: `{artifact.artifact_id}`",
+        f"schema {artifact.schema_version}",
+        f"vocabulário {artifact.categorical_vocabulary_version}",
+        f"renda {artifact.income_model_version}",
+        f"geografia {artifact.geography_model_version}",
+        f"{artifact.data_locale or 'localidade não registrada'}",
+        f"{artifact.unicode_normalization or 'normalização não registrada'}",
+        f"seed {artifact.seed}" if artifact.seed is not None else "seed não registrada",
+        f"treino {artifact.train_rows}" if artifact.train_rows is not None else "treino não registrado",
+    ]
+    if artifact.model == "ctgan" and ctgan_version:
+        details.append(f"CTGAN {ctgan_version}")
+    st.caption(" · ".join(details))
+    if artifact.model == "ctgan" and artifact.approval_status == "approved" and artifact.recommended_for_neural_generation:
+        st.info(
+            "Este é o artefato neural recomendado do projeto. "
+            "O modelo programático continua sendo a opção inicial geral para geração rápida e controlada."
         )
-    )
     warning = artifact_status_warning(artifact)
     if warning:
         st.warning(warning)

@@ -8,8 +8,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from synthetic_br_profiles_gan.evaluation.geography import geography_quality_report
 from synthetic_br_profiles_gan.evaluation.income import conditional_income_report
 from synthetic_br_profiles_gan.evaluation.privacy import privacy_metrics
+from synthetic_br_profiles_gan.evaluation.relationships import relational_validity_report
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
 
 
@@ -214,6 +216,7 @@ def evaluate_synthetic_data(
     metadata: DatasetMetadata | None = None,
     max_nearest_neighbor_rows: int = 1000,
     minimum_income_group_rows: int = 30,
+    geography_model_version: int = 1,
 ) -> dict[str, Any]:
     """Compara dados sintéticos com os splits de treino e holdout."""
     metadata = metadata or default_metadata()
@@ -227,6 +230,8 @@ def evaluate_synthetic_data(
             synthetic_model,
             minimum_group_rows=minimum_income_group_rows,
         ),
+        "geography": geography_quality_report(holdout, synthetic_model, geography_model_version=geography_model_version),
+        "relational_validity": relational_validity_report(synthetic_model, metadata),
         "row_counts": {
             "synthetic": int(len(synthetic_model)),
             "train": int(len(train)),

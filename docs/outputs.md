@@ -67,6 +67,9 @@ O manifesto de treinamento também registra:
 - `data_locale`: idioma canônico dos valores textuais, atualmente `pt-BR`;
 - `unicode_normalization`: forma Unicode utilizada, atualmente `NFC`;
 - `categorical_vocabulary_version`: versão do vocabulário categórico, atualmente `2`.
+- `income_model_version`: versão da calibração sintética de renda, independente do vocabulário;
+- `geography_model_version`: versão da representação geográfica usada pelo artefato;
+- `geography_catalog_version` e `geography_catalog_checksum`: versão e checksum do catálogo quando a CTGAN usa `Geo_Key`.
 
 ## Datasets gerados sob demanda
 
@@ -94,8 +97,13 @@ Também são registrados:
 - `source_model_vocabulary_version`;
 - `output_vocabulary_version`;
 - `legacy_value_normalization_applied`.
+- `source_model_geography_version`;
+- `output_geography_model_version`;
+- `geography_catalog_checksum`, quando o artefato neural usa geografia v2.
 
 Esses campos permitem identificar quando um modelo neural legado gerou valores com vocabulário anterior e a saída foi normalizada para o vocabulário atual.
+
+Modelos CTGAN com `geography_model_version = 2` também registram a representação geográfica usada no treinamento. `Geo_Key` é uma coluna interna: ela não aparece no dataset exportado, mas seu catálogo e checksum ficam preservados no artefato do modelo para rastreabilidade.
 
 ## Seleção de colunas na exportação
 
@@ -154,3 +162,13 @@ Novas execuções de pipeline podem produzir:
 Esses arquivos complementam `evaluation.json` e preservam campos legados como `duplicate_row_rate`, `exact_train_match_rate`, `exact_holdout_match_rate`, `unique_combinations` e `unique_combination_rate`.
 
 Os arquivos de evidência usam hashes das combinações-base e não devem incluir nomes, CPF, telefone ou documentos.
+
+## Artefatos geográficos
+
+Modelos CTGAN treinados com `geography_model_version = 2` salvam:
+
+- `metadata_ctgan_internal.json`: metadados da representação interna com `Geo_Key`;
+- `geography_catalog.json`: catálogo determinístico de `Geo_Key`, `Regiao`, `Estado`, `Municipio` e `DDD`;
+- `metadata_ctgan.json`: versão geográfica, checksum do catálogo, colunas externas e colunas internas de treinamento.
+
+Benchmarks recentes também registram métricas geográficas em `evaluation.json`, `raw_evaluation.json`, `final_evaluation.json` e `raw_final_comparison.json`, incluindo validade geográfica bruta, cobertura de chaves, TVD geográfica e taxa de chave conhecida.

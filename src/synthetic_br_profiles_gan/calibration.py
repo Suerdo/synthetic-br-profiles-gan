@@ -41,6 +41,7 @@ DEFAULT_CALIBRATION_CONFIG: ConfigDict = {
     "holdout_fraction": 0.2,
     "income": {"min": 800.0, "max": 50000.0},
     "income_model_version": INCOME_MODEL_VERSION,
+    "income_model_variant": "selected",
     "age": {"min": 18, "max": 85},
     "region_weights": {
         "Norte": 0.09,
@@ -150,10 +151,13 @@ def _sample_income(
     minimum: float,
     maximum: float,
     income_model_version: int = INCOME_MODEL_VERSION,
+    income_model_variant: str = "selected",
 ) -> float:
     if int(income_model_version) <= 1:
         return _sample_income_v1(rng, age, education, occupation, region, minimum, maximum)
-    return _sample_income_v2(rng, age, education, occupation, region, minimum, maximum)
+    if int(income_model_version) == 2:
+        return _sample_income_v2(rng, age, education, occupation, region, minimum, maximum)
+    return _sample_income_v3(rng, age, education, occupation, region, minimum, maximum, income_model_variant)
 
 
 def _sample_income_v1(
@@ -221,6 +225,82 @@ def _sample_income_v2(
     return round(float(np.clip(income, minimum, maximum)), 2)
 
 
+def _income_v3_adjustments(profile, variant: str) -> dict[str, float]:
+    variant = str(variant or "selected")
+    if variant == "candidate_a":
+        return {
+            "sigma_factor": 1.07,
+            "tail_probability_factor": 1.20,
+            "tail_probability_add": 0.004,
+            "tail_scale_factor": 1.10,
+            "variability_factor": 1.03,
+            "experience_add": 0.02,
+        }
+    # ``selected`` is the refined v2.1 concept selected after calibration diagnostics.
+    return {
+        "sigma_factor": 1.12,
+        "tail_probability_factor": 1.35,
+        "tail_probability_add": 0.006,
+        "tail_scale_factor": 1.18,
+        "variability_factor": 1.06,
+        "experience_add": 0.04,
+    }
+
+
+def _sample_income_v3(
+    rng: np.random.Generator,
+    age: int,
+    education: str,
+    occupation: str,
+    region: str,
+    minimum: float,
+    maximum: float,
+    variant: str = "selected",
+) -> float:
+    profile = get_occupation_profile(occupation)
+    adjustments = _income_v3_adjustments(profile, variant)
+    variability = income_variability_for_occupation(occupation)
+    adjusted_variability = 1.0 + (variability - 1.0) * float(adjustments["variability_factor"])
+    sigma = float(profile.income_sigma) * float(adjustments["sigma_factor"]) * adjusted_variability
+    base = float(
+        rng.lognormal(
+            mean=math.log(2050 * float(profile.income_location_factor)),
+            sigma=sigma,
+        )
+    )
+    education_multiplier = EDUCATION_INCOME_MULTIPLIER[education]
+    education_effect = 1.0 + (education_multiplier - 1.0) * float(profile.education_effect_strength)
+    experience_denominator = max(38, 65 - int(profile.minimum_age))
+    experience = np.clip((int(age) - int(profile.minimum_age)) / experience_denominator, 0.0, 1.0)
+    experience_strength = min(float(profile.experience_effect_strength) + float(adjustments["experience_add"]), 0.90)
+    experience_effect = 0.86 + float(experience) * experience_strength
+    if int(age) >= 67:
+        experience_effect *= 0.92
+    region_effect = 1.0 + (REGION_INCOME_MULTIPLIER[region] - 1.0) * 0.72
+    tail = 1.0
+    tail_probability = min(
+        float(profile.high_tail_probability) * float(adjustments["tail_probability_factor"])
+        + float(adjustments["tail_probability_add"]),
+        0.18,
+    )
+    if rng.random() < tail_probability:
+        tail = float(
+            rng.lognormal(
+                mean=0.0,
+                sigma=float(profile.high_tail_scale) * float(adjustments["tail_scale_factor"]) * adjusted_variability,
+            )
+        )
+    income = (
+        base
+        * income_multiplier_for_occupation(occupation)
+        * education_effect
+        * experience_effect
+        * region_effect
+        * tail
+    )
+    return round(float(np.clip(income, minimum, maximum)), 2)
+
+
 def generate_calibration_dataset(
     num_rows: int | None = None,
     seed: int | None = None,
@@ -237,6 +317,7 @@ def generate_calibration_dataset(
     income_min = float(effective["income"]["min"])
     income_max = float(effective["income"]["max"])
     income_model_version = int(effective.get("income_model_version", INCOME_MODEL_VERSION))
+    income_model_variant = str(effective.get("income_model_variant", "selected"))
     min_age = int(effective["age"]["min"])
     max_age = int(effective["age"]["max"])
     region_weights = effective["region_weights"]
@@ -255,7 +336,17 @@ def generate_calibration_dataset(
         occupation = _sample_occupation(rng, age, education)
         marital_status = _sample_marital_status(rng, age)
         dependents = _sample_dependents(rng, age, marital_status)
-        income = _sample_income(rng, age, education, occupation, region, income_min, income_max, income_model_version)
+        income = _sample_income(
+            rng,
+            age,
+            education,
+            occupation,
+            region,
+            income_min,
+            income_max,
+            income_model_version,
+            income_model_variant,
+        )
         rows.append(
             {
                 "Idade": age,

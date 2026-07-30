@@ -101,7 +101,11 @@ def _require_bool(config: ConfigDict, key: str, context: str) -> None:
 
 def validate_calibration_config(config: ConfigDict, context: str = "calibration") -> None:
     """Valida chaves, tipos e intervalos viáveis da configuração de calibração."""
-    _reject_unknown(config, {"seed", "num_rows", "holdout_fraction", "income", "age", "region_weights", "income_model_version"}, context)
+    _reject_unknown(
+        config,
+        {"seed", "num_rows", "holdout_fraction", "income", "age", "region_weights", "income_model_version", "income_model_variant"},
+        context,
+    )
     _require_positive_int(config, "num_rows", context)
     _require_non_negative_int(config, "seed", context)
     try:
@@ -142,6 +146,8 @@ def validate_calibration_config(config: ConfigDict, context: str = "calibration"
         raise ConfigurationError(f"{context}.region_weights must have positive total weight.")
     if "income_model_version" in config:
         _require_positive_int(config, "income_model_version", context)
+    if "income_model_variant" in config and not isinstance(config["income_model_variant"], str):
+        raise ConfigurationError(f"{context}.income_model_variant must be a string when provided.")
 
 
 def validate_generation_config(config: ConfigDict, context: str = "generation") -> None:
@@ -259,6 +265,7 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
             "discriminator_steps",
             "log_frequency",
             "pac",
+            "geography_model_version",
         }
         _reject_unknown(config, allowed, "models.ctgan")
         for key in ["epochs", "batch_size"]:
@@ -274,6 +281,10 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
         for key in ["embedding_dim", "discriminator_steps", "pac"]:
             if config.get(key) is not None:
                 _require_positive_int(config, key, "models.ctgan")
+        if "geography_model_version" in config:
+            _require_positive_int(config, "geography_model_version", "models.ctgan")
+            if int(config["geography_model_version"]) not in {1, 2}:
+                raise ConfigurationError("models.ctgan.geography_model_version must be 1 or 2.")
         for key in ["generator_lr", "discriminator_lr", "generator_decay", "discriminator_decay"]:
             if config.get(key) is not None and float(config[key]) < 0:
                 raise ConfigurationError(f"models.ctgan.{key} must be non-negative.")
@@ -350,6 +361,7 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
                 "discriminator_steps",
                 "log_frequency",
                 "pac",
+                "geography_model_version",
             }
             _reject_unknown(model_config, allowed, f"{context}.ctgan")
             for key in ["seed", "epochs", "batch_size"]:
@@ -367,6 +379,10 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
             for key in ["embedding_dim", "discriminator_steps", "pac"]:
                 if model_config.get(key) is not None:
                     _require_positive_int(model_config, key, f"{context}.ctgan")
+            if "geography_model_version" in model_config:
+                _require_positive_int(model_config, "geography_model_version", f"{context}.ctgan")
+                if int(model_config["geography_model_version"]) not in {1, 2}:
+                    raise ConfigurationError(f"{context}.ctgan.geography_model_version must be 1 or 2.")
             for key in ["generator_lr", "discriminator_lr", "generator_decay", "discriminator_decay"]:
                 if model_config.get(key) is not None and float(model_config[key]) < 0:
                     raise ConfigurationError(f"{context}.ctgan.{key} must be non-negative.")
@@ -388,6 +404,7 @@ def validate_benchmark_config(config: ConfigDict) -> None:
             "resource_limits",
             "ranking",
             "vocabulary_quality",
+            "income_calibration",
         },
         "benchmark_config",
     )
@@ -413,8 +430,8 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     )
     if not isinstance(benchmark.get("name"), str) or not benchmark["name"]:
         raise ConfigurationError("benchmark.name must be a non-empty string.")
-    if benchmark.get("type", "quality") not in {"quality", "capacity", "vocabulary_quality", "income_realism"}:
-        raise ConfigurationError("benchmark.type must be quality, capacity, vocabulary_quality, or income_realism.")
+    if benchmark.get("type", "quality") not in {"quality", "capacity", "vocabulary_quality", "income_realism", "income_calibration"}:
+        raise ConfigurationError("benchmark.type must be quality, capacity, vocabulary_quality, income_realism, or income_calibration.")
     models = benchmark.get("models")
     if not isinstance(models, list) or not models:
         raise ConfigurationError("benchmark.models must be a non-empty list.")
@@ -604,6 +621,20 @@ def validate_benchmark_config(config: ConfigDict) -> None:
     for key in ["minimum_income_group_count", "low_count_threshold"]:
         if key in vocabulary_quality:
             _require_positive_int(vocabulary_quality, key, "vocabulary_quality")
+
+    income_calibration = config.get("income_calibration", {})
+    if not isinstance(income_calibration, dict):
+        raise ConfigurationError("income_calibration must be a mapping when provided.")
+    _reject_unknown(income_calibration, {"rows_per_occupation", "occupations"}, "income_calibration")
+    if "rows_per_occupation" in income_calibration:
+        _require_positive_int(income_calibration, "rows_per_occupation", "income_calibration")
+    if "occupations" in income_calibration:
+        occupations = income_calibration["occupations"]
+        if not isinstance(occupations, list) or not occupations:
+            raise ConfigurationError("income_calibration.occupations must be a non-empty list when provided.")
+        for index, occupation in enumerate(occupations):
+            if not isinstance(occupation, str) or not occupation:
+                raise ConfigurationError(f"income_calibration.occupations[{index}] must be a non-empty string.")
 
 
 def validate_pipeline_config(config: ConfigDict) -> None:
