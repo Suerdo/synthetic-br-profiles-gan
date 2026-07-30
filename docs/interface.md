@@ -146,7 +146,15 @@ Esta primeira versão não implementa histórico persistente nem limpeza automá
 
 A página de governança lê evidências reais de manifestos e eventos locais. Quando não houver dado suficiente, exibe `Não disponível`, `Não avaliado` ou `Sem execução registrada`. Cada bloco informa a origem esperada, como `manifesto de execução`, `validation.json`, `quality_gates.json`, `evaluation.json` ou `generation.json`.
 
-A página foi simplificada para concentrar `Resumo Operacional`, `Qualidade dos Dados`, `Privacidade`, `Execuções Recentes`, `Auditoria` e `Como interpretar os indicadores`. As seções principais usam containers com borda, fundo claro, padding consistente e títulos no topo. O histórico visual de artefatos e a matriz regulatória não fazem parte dessa tela. Consulte `docs/governance.md` para o glossário operacional e `docs/compliance.md` para referências regulatórias.
+A página foi simplificada para concentrar `Resumo Operacional`, `Modelo Neural Recomendado`, `Qualidade dos Dados`, `Privacidade`, `Execuções Recentes`, `Auditoria` e `Como interpretar os indicadores`. As seções principais usam containers com borda, fundo claro, padding consistente e títulos no topo. O histórico visual de artefatos e a matriz regulatória não fazem parte dessa tela. Consulte `docs/governance.md` para o glossário operacional e `docs/compliance.md` para referências regulatórias.
+
+## Artefato neural recomendado
+
+A CTGAN aprovada é selecionada pelo `ModelRegistry` por uma regra explícita: primeiro artefatos `approved` com `recommended_for_neural_generation = true`, depois outros aprovados, candidatos recomendados e candidatos. Artefatos `smoke`, `experimental` e `legacy` continuam visíveis quando tecnicamente válidos, mas não são pré-selecionados como recomendados.
+
+O artefato `artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/` é o artefato neural recomendado. Ele usa vocabulário v2, renda v3 e geografia v2. O modelo programático permanece como padrão geral da plataforma; a CTGAN aprovada é recomendada para geração neural avaliada; a GAN simples permanece experimental.
+
+A aprovação é técnica e interna. Ela não é certificação externa, não garante anonimização e não representa validação populacional oficial.
 
 ## Limitações
 

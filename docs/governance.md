@@ -118,7 +118,7 @@ Falhas de escrita do arquivo de auditoria são registradas em log e não invalid
 
 Artefatos neurais aparecem na tela `Gerar dados` quando são tecnicamente válidos: manifesto legível, modelo reconhecido, arquivos obrigatórios presentes, schema compatível e diretório dentro da raiz administrada. A aprovação não é usada como bloqueio automático de exibição; ela aparece como status do artefato.
 
-Artefatos `smoke`, `experimental`, `candidate` ou `legacy` recebem avisos específicos. O artefato mais recente de cada modelo neural é selecionado por padrão na tela de geração, mas recência não significa melhor qualidade, aprovação ou recomendação.
+Artefatos `smoke`, `experimental`, `candidate` ou `legacy` recebem avisos específicos. Para a CTGAN, o `ModelRegistry` prioriza artefatos `approved` com `recommended_for_neural_generation = true`; recência é usada apenas como critério secundário dentro do mesmo nível de recomendação.
 
 A página `Governança` não exibe mais a seção visual `Modelos e versões`. Essa remoção é apenas visual e não altera `ModelRegistry`, manifestos ou seleção de artefatos.
 
@@ -135,7 +135,7 @@ Correspondência exata com treino é um indicador de possível memorização, ma
 
 O `income_model_version` é exibido separadamente da versão do vocabulário. A versão 3 refina a calibração sintética de renda e deve ser interpretada como parâmetro experimental do projeto, não como dado salarial oficial.
 
-O artefato CTGAN criado após a confirmação independente da candidate_c possui finalidade `recommended_candidate`. Esse status indica que o artefato pode ser considerado em uma etapa posterior de aprovação, mas não significa `approved`, `default` ou `production`.
+O artefato CTGAN criado após a confirmação independente da candidate_c foi preservado como `recommended_candidate`. A cópia aprovada posterior é registrada separadamente e não significa `default` ou `production`.
 
 ## Semântica das métricas raw e final
 
@@ -162,4 +162,38 @@ Na interface e nos relatórios de governança, `Geo_Key` deve ser tratado como m
 
 A confirmação do perfil `ctgan_income_v3_geo_v2_candidate` nas seeds `47`, `48` e `49` apresentou validade geográfica raw de 100%, cobertura de estados, municípios e DDDs de 100%, duplicidade-base igual a zero e match exato com treino igual a zero. A TVD de `Geo_Key` ficou entre 0,098 e 0,111, portanto a coerência geográfica melhorou sem eliminar a necessidade de monitorar diversidade.
 
-O artefato `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` permanece com finalidade `recommended_candidate`. Esse status indica candidato técnico para avaliação posterior; não significa aprovação institucional, modelo padrão ou uso em produção.
+## Aprovação técnica da CTGAN renda v3 e geografia v2
+
+Após a revisão final de governança, o candidato `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` foi preservado e uma cópia aprovada foi criada em:
+
+```text
+artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/
+```
+
+A cópia aprovada registra `approval_manifest.json`, `manifest.before-approval.json`, `training_manifest.before-approval.json`, `recommended_for_neural_generation = true` e `general_platform_default = false`.
+
+Evidências verificadas:
+
+- benchmark de confirmação `ctgan-income-v3-geo-v2-confirmation-20260730T012716Z-d44f6686`;
+- seeds `47`, `48` e `49` concluídas e aprovadas;
+- `categorical_vocabulary_version = 2`;
+- `income_model_version = 3`;
+- `geography_model_version = 2`;
+- checksum geográfico `0b12f8466842767c637a37cbff3939d730c1a06c87770c0846cfdeebd8ccf033`;
+- validade geográfica raw de 100%;
+- validade global raw entre 91,56% e 96,85%;
+- zero identificadores duplicados;
+- zero linhas finais inválidas;
+- zero duplicidade-base;
+- zero correspondência exata com treino;
+- cobertura de estados, municípios, DDDs e `Geo_Key` de 100%.
+
+Cobertura ocupacional:
+
+- seeds `47` e `49`: 37/37 ocupações;
+- seed `48`: 36/37 ocupações;
+- categoria ausente: `Diretor`, registrada como categoria rara.
+
+A ausência isolada de `Diretor` não foi interpretada como colapso geral, mas permanece como limitação visível.
+
+A aprovação representa uma decisão interna baseada nos critérios técnicos do projeto. Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial.

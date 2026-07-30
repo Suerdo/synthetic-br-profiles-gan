@@ -62,7 +62,7 @@ def _render_model_section(st: Any, entry: ModelCatalogEntry) -> None:
 def _comparison_table_html() -> str:
     rows = [
         ("Programático", "Não exige", "Baixo", "Recomendado"),
-        ("CTGAN", "Exige", "Alto", "Avançado"),
+        ("CTGAN", "Exige", "Alto", "Neural recomendado"),
         ("GAN Simples", "Exige", "Médio", "Experimental"),
     ]
     body = "".join(

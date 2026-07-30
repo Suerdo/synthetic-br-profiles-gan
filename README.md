@@ -418,17 +418,21 @@ A seleção de colunas é aplicada somente depois da geração interna das 18 co
 
 A página de governança lê manifestos, histórico de modelos, validações, quality gates e eventos sanitizados em `artifacts/ui_audit/events.jsonl`. O conteúdo essencial sobre LGPD, ECA Digital e uso seguro foi integrado à governança. Ele é educacional: não constitui parecer jurídico, certificação regulatória, auditoria formal ou garantia de conformidade. Consulte também `docs/governance.md`, `docs/compliance.md` e `docs/design-system.md`.
 
-Ao selecionar `ctgan` ou `simple_gan`, o artefato mais recente daquele modelo é pré-selecionado por `created_at_utc`. Esse critério indica apenas recência, não melhor qualidade nem aprovação. Artefatos `Smoke`, `Experimental`, `Candidato`, `Legado` ou `Sem classificação` aparecem com avisos próprios.
+Ao selecionar `ctgan`, o `ModelRegistry` prioriza explicitamente o artefato `approved` com `recommended_for_neural_generation = true`. Os demais artefatos tecnicamente válidos continuam disponíveis para seleção manual. Recência continua sendo usada apenas como critério secundário dentro do mesmo nível de recomendação; “mais recente” não significa automaticamente melhor qualidade.
 
 ## Diversidade, memorização e renda condicional
 
 A avaliação diferencia duplicidade de combinações-base, correspondência exata com treino, correspondência exata com holdout e realismo condicional da renda. Essas métricas usam as 11 colunas-base do modelo e excluem identificadores derivados como CPF, telefone e documentos.
 
-O refinamento `income_model_version = 3` ajusta apenas parâmetros sintéticos de dispersão e cauda da renda, sem alterar o vocabulário categórico versão 2 nem usar gênero no cálculo. A CTGAN candidate_c foi confirmada em seeds independentes `44`, `45` e `46` e gerou um artefato `recommended_candidate`, ainda sem status `approved`, `default` ou `production`.
+O refinamento `income_model_version = 3` ajusta apenas parâmetros sintéticos de dispersão e cauda da renda, sem alterar o vocabulário categórico versão 2 nem usar gênero no cálculo. A CTGAN candidate_c foi confirmada em seeds independentes `44`, `45` e `46` e serviu de base para o refinamento geográfico.
 
 A CTGAN também passou a ter uma representação geográfica neural opcional, `geography_model_version = 2`, baseada na chave interna `Geo_Key`. Ela codifica combinações permitidas de `Regiao`, `Estado`, `Municipio` e `DDD` durante o treinamento e é decodificada antes da saída pública. O schema externo permanece inalterado.
 
-A confirmação independente do perfil `ctgan_income_v3_geo_v2_candidate` nas seeds `47`, `48` e `49` elevou a validade geográfica bruta de aproximadamente 0,19%-0,31% na representação independente para 100% com `Geo_Key`. O artefato gerado permanece `recommended_candidate`, sem promoção automática para `approved`, `default` ou `production`.
+A confirmação independente do perfil `ctgan_income_v3_geo_v2_candidate` nas seeds `47`, `48` e `49` elevou a validade geográfica bruta de aproximadamente 0,19%-0,31% na representação independente para 100% com `Geo_Key`. Após revisão final de governança, foi criada uma cópia aprovada em `artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/`, com `recommended_for_neural_generation = true` e `general_platform_default = false`.
+
+Essa aprovação é uma decisão técnica interna baseada nos critérios do projeto. Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial. O modelo programático permanece como padrão geral para geração rápida e controlada; a CTGAN aprovada é o artefato neural recomendado; a GAN simples permanece como baseline acadêmico experimental.
+
+Como `artifacts/` fica fora do versionamento, o artefato aprovado não é distribuído automaticamente pelo Git. Opções futuras de distribuição incluem GitHub Release, armazenamento de objetos, volume de implantação ou repositório institucional de modelos.
 
 Consulte `docs/privacy-and-diversity.md`, `docs/income-realism.md` e `docs/geography-model.md` para a representação canônica, os artefatos, os quality gates e as limitações de interpretação.
 

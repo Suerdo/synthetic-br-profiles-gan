@@ -69,6 +69,8 @@ class SavedModelArtifact:
     is_legacy_income_model: bool
     purpose: str
     approval_status: str
+    recommended_for_neural_generation: bool
+    general_platform_default: bool
     is_legacy_vocabulary: bool
     compatibility_normalization_required: bool
     manifest: dict[str, Any]
@@ -148,6 +150,8 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
                 is_legacy_income_model=bool(income_model_version < INCOME_MODEL_VERSION),
                 purpose=_artifact_purpose(manifest, artifact_path),
                 approval_status=_artifact_approval_status(manifest, artifact_path),
+                recommended_for_neural_generation=bool(manifest.get("recommended_for_neural_generation", False)),
+                general_platform_default=bool(manifest.get("general_platform_default", False)),
                 is_legacy_vocabulary=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 compatibility_normalization_required=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 manifest=manifest,
@@ -159,6 +163,27 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
         )
     artifacts.sort(key=lambda item: (item.model, item.created_at_utc or "", item.artifact_id))
     return artifacts
+
+
+def get_recommended_artifact(models_root: str | Path, model: str) -> SavedModelArtifact | None:
+    """Seleciona o artefato recomendado sem confundir recência com aprovação."""
+    candidates = list_saved_model_artifacts(models_root, model=model)
+    ranked = [
+        artifact
+        for artifact in candidates
+        if _artifact_recommendation_rank(artifact) < 4
+    ]
+    if not ranked:
+        return None
+    return sorted(ranked, key=lambda item: (_artifact_recommendation_rank(item), -_artifact_datetime_key(item), item.artifact_id))[0]
+
+
+def sort_artifacts_for_generation(artifacts: list[SavedModelArtifact]) -> list[SavedModelArtifact]:
+    """Ordena artefatos para seleção manual, priorizando aprovação técnica antes de recência."""
+    return sorted(
+        artifacts,
+        key=lambda item: (_artifact_recommendation_rank(item), -_artifact_datetime_key(item), item.artifact_id),
+    )
 
 
 def validate_required_model_files(model_path: str | Path, model: str) -> None:
@@ -206,6 +231,43 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _artifact_recommendation_rank(artifact: SavedModelArtifact) -> int:
+    status = (artifact.approval_status or "").lower()
+    purpose = (artifact.purpose or "").lower()
+    if status == "legacy" or purpose == "legacy" or artifact.is_legacy_vocabulary:
+        return 6
+    if status == "approved" and artifact.recommended_for_neural_generation:
+        return 0
+    if status == "approved" or purpose == "approved":
+        return 1
+    if status == "recommended_candidate" or purpose == "recommended_candidate":
+        return 2
+    if status == "candidate" or purpose == "candidate":
+        return 3
+    if status in {"experimental", "smoke"} or purpose in {"experimental", "smoke"}:
+        return 5
+    return 4
+
+
+def _artifact_datetime_key(artifact: SavedModelArtifact) -> float:
+    value = artifact.created_at_utc
+    if isinstance(value, str) and value:
+        normalized = value.replace("Z", "+00:00")
+        try:
+            from datetime import datetime, timezone
+
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            pass
+    try:
+        return artifact.artifact_path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _artifact_purpose(manifest: dict[str, Any], artifact_path: Path) -> str:

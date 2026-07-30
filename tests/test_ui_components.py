@@ -18,7 +18,7 @@ import pandas as pd
 
 from synthetic_br_profiles_gan.config import ConfigurationError, load_yaml_config
 from synthetic_br_profiles_gan.metadata import default_metadata
-from synthetic_br_profiles_gan.models.registry import list_saved_model_artifacts
+from synthetic_br_profiles_gan.models.registry import get_recommended_artifact, list_saved_model_artifacts
 from synthetic_br_profiles_gan.services.generation_service import GenerationResult
 from synthetic_br_profiles_gan.services.training_service import TrainingRequest, run_training
 from synthetic_br_profiles_gan.ui.generation_adapter import (
@@ -73,6 +73,7 @@ def _write_neural_artifact(
     vocabulary_version: int = 2,
     purpose: str = "approved",
     created_at_utc: str = "2026-07-28T00:00:00+00:00",
+    recommended_for_neural_generation: bool = False,
 ) -> Path:
     metadata = default_metadata()
     artifact = root / artifact_name
@@ -93,6 +94,8 @@ def _write_neural_artifact(
         "categorical_vocabulary_version": vocabulary_version,
         "approval_status": approval_status,
         "purpose": purpose,
+        "recommended_for_neural_generation": recommended_for_neural_generation,
+        "general_platform_default": False,
     }
     (artifact / "training_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     metadata.save(artifact / "metadata.json")
@@ -148,7 +151,8 @@ class UIComponentsTest(unittest.TestCase):
         by_name = model_catalog_by_name()
         self.assertTrue(by_name["programmatic"].recommended)
         self.assertFalse(by_name["programmatic"].requires_saved_artifact)
-        self.assertEqual(by_name["ctgan"].status_label, "Avançado")
+        self.assertEqual(by_name["ctgan"].status_label, "Artefato neural recomendado")
+        self.assertFalse(by_name["ctgan"].recommended)
         self.assertTrue(by_name["ctgan"].requires_saved_artifact)
         self.assertTrue(by_name["simple_gan"].experimental)
         self.assertTrue(by_name["simple_gan"].requires_saved_artifact)
@@ -211,18 +215,29 @@ class UIComponentsTest(unittest.TestCase):
             _write_neural_artifact(models_root, "ctgan", "ctgan-v1", vocabulary_version=1, approval_status="approved", created_at_utc="2026-07-25T00:00:00+00:00")
             _write_neural_artifact(models_root, "ctgan", "ctgan-v2-smoke", approval_status="smoke", purpose="smoke", created_at_utc="2026-07-27T00:00:00+00:00")
             _write_neural_artifact(models_root, "ctgan", "ctgan-v2-candidate", approval_status="candidate", purpose="candidate", created_at_utc="2026-07-28T00:00:00+00:00")
+            _write_neural_artifact(
+                models_root,
+                "ctgan",
+                "ctgan-v2-approved",
+                approval_status="approved",
+                purpose="approved",
+                created_at_utc="2026-07-26T00:00:00+00:00",
+                recommended_for_neural_generation=True,
+            )
             invalid = models_root / "ctgan-invalid"
             invalid.mkdir(parents=True)
             (invalid / "training_manifest.json").write_text("{}", encoding="utf-8")
             config = _ui_config(models_root, root / "sessions")
             all_artifacts = list_available_artifacts(models_root)
             generation_artifacts = list_generation_artifacts(config)
-            self.assertEqual({artifact.artifact_id for artifact in all_artifacts["ctgan"]}, {"ctgan-v1", "ctgan-v2-smoke", "ctgan-v2-candidate"})
+            self.assertEqual({artifact.artifact_id for artifact in all_artifacts["ctgan"]}, {"ctgan-v1", "ctgan-v2-smoke", "ctgan-v2-candidate", "ctgan-v2-approved"})
             self.assertEqual(
                 [artifact.artifact_id for artifact in generation_artifacts["ctgan"]],
-                ["ctgan-v2-candidate", "ctgan-v2-smoke", "ctgan-v1"],
+                ["ctgan-v2-approved", "ctgan-v2-candidate", "ctgan-v2-smoke", "ctgan-v1"],
             )
             by_id = {artifact.artifact_id: artifact for artifact in generation_artifacts["ctgan"]}
+            self.assertEqual(artifact_status_label(by_id["ctgan-v2-approved"]), "Aprovado")
+            self.assertTrue(by_id["ctgan-v2-approved"].recommended_for_neural_generation)
             self.assertEqual(artifact_status_label(by_id["ctgan-v2-candidate"]), "Candidato")
             self.assertIn("avaliação", artifact_status_warning(by_id["ctgan-v2-candidate"]) or "")
             self.assertEqual(artifact_status_label(by_id["ctgan-v2-smoke"]), "Smoke")
@@ -230,6 +245,37 @@ class UIComponentsTest(unittest.TestCase):
             self.assertEqual(artifact_status_label(by_id["ctgan-v1"]), "Legado")
             self.assertIn("versão anterior", artifact_status_warning(by_id["ctgan-v1"]) or "")
             self.assertEqual(default_generation_model(config, all_artifacts["ctgan"]), "programmatic")
+
+    def test_approved_ctgan_is_recommended_artifact_without_changing_general_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            models_root = root / "models"
+            _write_neural_artifact(
+                models_root,
+                "ctgan",
+                "ctgan-approved",
+                approval_status="approved",
+                purpose="approved",
+                recommended_for_neural_generation=True,
+                created_at_utc="2026-07-30T00:00:00+00:00",
+            )
+            _write_neural_artifact(
+                models_root,
+                "simple_gan",
+                "simple-valid",
+                approval_status="experimental",
+                purpose="experimental",
+            )
+            config = _ui_config(models_root, root / "sessions")
+            selected = get_recommended_artifact(models_root, "ctgan")
+            snapshot = build_governance_snapshot(config)
+
+            self.assertIsNotNone(selected)
+            self.assertEqual(selected.artifact_id, "ctgan-approved")
+            self.assertTrue(selected.recommended_for_neural_generation)
+            self.assertFalse(selected.general_platform_default)
+            self.assertEqual(default_generation_model(config, list_saved_model_artifacts(models_root)), "programmatic")
+            self.assertTrue(any(row["campo"] == "Identificador" and row["valor"] == "ctgan-approved" for row in snapshot.recommended_neural_model))
 
     def test_adapter_creates_unique_directory_and_programmatic_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -446,7 +492,7 @@ class UIComponentsTest(unittest.TestCase):
         catalog = model_catalog_by_name()
         self.assertIn("Dados Sintéticos Brasileiro", app_source)
         self.assertNotIn("Dados Sintéticos BR", app_source)
-        self.assertEqual(catalog["ctgan"].label, "CTGAN — Modelo Tabular Avançado")
+        self.assertEqual(catalog["ctgan"].label, "CTGAN — Artefato Neural Recomendado")
         self.assertEqual(catalog["simple_gan"].label, "GAN Simples — Experimental")
         self.assertIn("Volume e Reprodutibilidade", inspect.getsource(generate_page.render_generation_page))
         self.assertIn("Usos Recomendados", inspect.getsource(models_page._render_model_section))

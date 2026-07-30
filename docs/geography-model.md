@@ -94,17 +94,19 @@ Foi criado o perfil `ctgan_income_v3_geo_v2_candidate`, mantendo os hiperparâme
 
 A validade geográfica de 100% não implica distribuição perfeita. Por isso, a avaliação também registra cobertura de chaves, cobertura de estados, municípios e DDDs, TVD por componente e cobertura de chaves raras.
 
-## Artefato Candidato
+## Artefato aprovado
 
 A confirmação gerou o artefato:
 
 ```text
-artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/
+artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/
 ```
 
-Finalidade: `recommended_candidate`.
+Finalidade: `approved`.
 
-Esse status não significa `approved`, `default` ou `production`. O artefato permanece candidato até uma decisão explícita de aprovação.
+O artefato aprovado foi criado por cópia do candidato `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/`, que permanece preservado. A cópia registra `approval_manifest.json`, `recommended_for_neural_generation = true` e `general_platform_default = false`.
+
+Esse status não significa `default`, `production`, certificação externa, garantia de anonimização ou validação populacional oficial. A aprovação é uma decisão técnica interna baseada nas evidências do projeto.
 
 ## Limitações
 

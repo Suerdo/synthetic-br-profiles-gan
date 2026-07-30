@@ -189,4 +189,6 @@ Na seed `48`, a ocupação ausente foi `Diretor`, uma categoria rara. Não houve
 
 O pós-processamento geográfico deixou de ser necessário nas linhas selecionadas: em cada seed, as 20.000 linhas permaneceram com geografia inalterada, sem reparo, substituição ou rejeição por geografia. Ainda ocorreram alterações por outros motivos, principalmente regras numéricas e profissionais, em 1.689, 1.033 e 631 linhas nas seeds `47`, `48` e `49`, respectivamente.
 
-O artefato gerado em `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` possui finalidade `recommended_candidate`. Ele não é `approved`, `default` nem `production`; uma eventual aprovação futura exige decisão explícita.
+O artefato gerado em `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` possui finalidade `recommended_candidate` e permanece preservado como candidato histórico. Após revisão final de governança, foi criada uma cópia aprovada em `artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/`.
+
+A aprovação registra `recommended_for_neural_generation = true` e `general_platform_default = false`. Portanto, a CTGAN passa a ter um artefato neural recomendado, mas o modelo programático continua sendo o padrão geral para geração rápida e controlada. A GAN simples permanece como baseline experimental.

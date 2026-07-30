@@ -13,7 +13,7 @@ from typing import Any, Sequence
 import pandas as pd
 
 from synthetic_br_profiles_gan.config import ConfigurationError
-from synthetic_br_profiles_gan.models.registry import SavedModelArtifact, list_saved_model_artifacts
+from synthetic_br_profiles_gan.models.registry import SavedModelArtifact, list_saved_model_artifacts, sort_artifacts_for_generation
 from synthetic_br_profiles_gan.services.generation_service import GenerationRequest, GenerationResult, run_generation
 from synthetic_br_profiles_gan.ui.services.audit_service import write_audit_event
 from synthetic_br_profiles_gan.ui.ui_config import UIConfig, SUPPORTED_UI_FORMATS
@@ -65,7 +65,7 @@ def list_generation_artifacts(config: UIConfig) -> dict[str, list[SavedModelArti
         if artifact.model in {"ctgan", "simple_gan"}:
             grouped.setdefault(artifact.model, []).append(artifact)
     for model in grouped:
-        grouped[model].sort(key=_artifact_datetime_key, reverse=True)
+        grouped[model] = sort_artifacts_for_generation(grouped[model])
     return grouped
 
 
@@ -197,6 +197,8 @@ def artifact_status_label(artifact: SavedModelArtifact) -> str:
         return "Legado"
     if status == "approved" or purpose == "approved":
         return "Aprovado"
+    if status == "recommended_candidate" or purpose == "recommended_candidate":
+        return "Candidato recomendado"
     if status == "candidate" or purpose == "candidate":
         return "Candidato"
     if status == "smoke" or purpose == "smoke":
@@ -215,6 +217,8 @@ def artifact_status_warning(artifact: SavedModelArtifact) -> str | None:
         return "Este artefato possui finalidade experimental. Avalie suas métricas antes de utilizar os dados em atividades críticas."
     if label == "Legado":
         return "Este artefato utiliza uma versão anterior do vocabulário. A saída será normalizada, mas poderá apresentar menor diversidade de ocupações."
+    if label == "Candidato recomendado":
+        return "Este artefato foi recomendado tecnicamente para avaliação de aprovação, mas ainda não era um artefato aprovado."
     if label == "Candidato":
         return "Este artefato está em avaliação e ainda não foi definido como modelo neural padrão."
     return None

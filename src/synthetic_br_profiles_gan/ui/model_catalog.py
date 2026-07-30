@@ -114,16 +114,17 @@ MODEL_CATALOG: tuple[ModelCatalogEntry, ...] = (
     ),
     ModelCatalogEntry(
         name="ctgan",
-        label="CTGAN — Modelo Tabular Avançado",
+        label="CTGAN — Artefato Neural Recomendado",
         category="Modelo Neural Tabular",
-        status="Avançado",
+        status="Artefato neural recomendado",
         recommended=False,
         experimental=False,
         complexity_level="Alta",
         short_description="Modelo generativo tabular capaz de aprender atributos numéricos, categóricos e discretos.",
         detailed_description=(
             "Modelo generativo especializado em dados tabulares, capaz de aprender conjuntamente "
-            "atributos numéricos, categóricos e discretos."
+            "atributos numéricos, categóricos e discretos. O artefato aprovado usa vocabulário v2, "
+            "renda v3 e representação geográfica v2."
         ),
         simple_summary=(
             "Aprende padrões a partir de dados tabulares de treinamento e gera novas combinações sintéticas, "
@@ -142,7 +143,9 @@ MODEL_CATALOG: tuple[ModelCatalogEntry, ...] = (
             "uso de artefatos treinados e avaliados pela equipe responsável",
         ),
         benefits=(
-            "Cobriu as 37 ocupações no benchmark do vocabulário 2.",
+            "Possui artefato neural aprovado internamente após confirmação em três seeds independentes.",
+            "Alcançou validade geográfica raw de 100% com `geography_model_version = 2`.",
+            "Cobriu pelo menos 36/37 ocupações no benchmark de confirmação, com 37/37 nas seeds 47 e 49.",
             "Aprende relações categóricas e numéricas a partir da calibração.",
             "Foi mais robusta que a GAN simples nos experimentos atuais.",
             "Permite avaliar trade-offs entre flexibilidade estatística e custo computacional.",
@@ -154,8 +157,13 @@ MODEL_CATALOG: tuple[ModelCatalogEntry, ...] = (
             "Pode gerar combinações brutas inválidas.",
             "O resultado final depende parcialmente do pós-processamento.",
             "Pode apresentar risco de memorização quando treinada com dados sensíveis.",
+            "A fonte local associa DDDs ao estado, não a um DDD oficial único por município.",
+            "A aprovação é técnica e interna, sem certificação externa.",
         ),
-        realism_profile="Boa cobertura categórica observada, com dependência relevante do treinamento e do pós-processamento.",
+        realism_profile=(
+            "O artefato aprovado registrou validade global raw entre 91,56% e 96,85%, duplicidade-base zero, "
+            "match exato com treino zero e modelo salvo com aproximadamente 2,93 MB em execução CPU."
+        ),
         privacy_considerations=(
             "Requer avaliação de memorização quando treinada com dados sensíveis.",
             "Menor distância estatística não significa maior privacidade.",
@@ -173,8 +181,10 @@ MODEL_CATALOG: tuple[ModelCatalogEntry, ...] = (
             "Primeira falha por recursos: 6.400.000 registros. O limite absoluto não foi determinado."
         ),
         benchmark_notes=(
-            "No benchmark do vocabulário 2, cobriu 100% das 37 ocupações e teve cerca de 91,3% "
-            "de validade bruta entre escolaridade e ocupação, chegando a 100% no resultado final."
+            "O artefato CTGAN com renda v3 e geografia v2 passou em 3/3 seeds de confirmação. "
+            "A validade geográfica raw foi 100%, a validade global raw ficou entre 91,56% e 96,85%, "
+            "a duplicidade-base foi zero e a correspondência exata com treino foi zero. "
+            "A cobertura ocupacional mínima foi 36/37, com ausência isolada de `Diretor` na seed 48."
         ),
     ),
     ModelCatalogEntry(

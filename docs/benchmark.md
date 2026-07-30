@@ -812,3 +812,31 @@ artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/
 ```
 
 Finalidade: `recommended_candidate`. Esse status não representa `approved`, `default` ou `production`.
+
+### Aprovação técnica após revisão de governança
+
+Na revisão final, as evidências do benchmark `ctgan-income-v3-geo-v2-confirmation-20260730T012716Z-d44f6686` foram validadas programaticamente antes da alteração de status. O candidato original foi preservado, e uma cópia promovida foi criada em:
+
+```text
+artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/
+```
+
+A cópia aprovada contém `approval_manifest.json`, `manifest.before-approval.json` e `training_manifest.before-approval.json`. O manifesto de treinamento passou a registrar `purpose = approved`, `approval_status = approved`, `recommended_for_neural_generation = true` e `general_platform_default = false`.
+
+Critérios verificados:
+
+- três seeds de confirmação concluídas e `approved`;
+- versões `categorical_vocabulary_version = 2`, `income_model_version = 3` e `geography_model_version = 2`;
+- checksum geográfico válido;
+- `Geo_Key` ausente no schema externo;
+- validade geográfica raw de 100%;
+- validade global raw entre 91,56% e 96,85%;
+- zero linhas finais inválidas;
+- zero identificadores duplicados;
+- zero duplicidade-base;
+- zero correspondência exata com treino;
+- cobertura de estados, municípios, DDDs e `Geo_Key` de 100%.
+
+Limitação ocupacional preservada: seeds `47` e `49` cobriram 37/37 ocupações; a seed `48` cobriu 36/37, com ausência de `Diretor`, uma categoria rara. Essa ausência isolada não representa colapso geral, mas continua registrada como limitação.
+
+A aprovação é técnica e interna. Ela não constitui certificação externa, garantia de anonimização, validação populacional oficial, status `production` ou escolha do modelo padrão geral da plataforma.
