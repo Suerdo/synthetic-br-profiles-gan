@@ -20,7 +20,10 @@ from synthetic_br_profiles_gan.evaluation.income_calibration import (
     run_income_calibration_analysis,
 )
 from synthetic_br_profiles_gan.localization import CATEGORICAL_VOCABULARY_VERSION, INCOME_MODEL_VERSION
-from synthetic_br_profiles_gan.models.profiles import ctgan_income_v3_recommended_candidate_profile
+from synthetic_br_profiles_gan.models.profiles import (
+    ctgan_income_v3_geo_v2_candidate_profile,
+    ctgan_income_v3_recommended_candidate_profile,
+)
 from synthetic_br_profiles_gan.ui.model_catalog import model_catalog_by_name
 
 
@@ -120,6 +123,20 @@ class IncomeV3RefinementTest(unittest.TestCase):
         self.assertEqual(ctgan["generator_lr"], 0.0001)
         self.assertEqual(ctgan["discriminator_lr"], 0.0001)
         self.assertEqual(ctgan["pac"], 10)
+
+    def test_ctgan_geo_v2_candidate_only_changes_geography_representation(self) -> None:
+        baseline = ctgan_income_v3_recommended_candidate_profile()
+        candidate = ctgan_income_v3_geo_v2_candidate_profile()
+        self.assertEqual(candidate["profile_name"], "ctgan_income_v3_geo_v2_candidate")
+        self.assertEqual(candidate["purpose"], "recommended_candidate")
+        self.assertEqual(candidate["categorical_vocabulary_version"], baseline["categorical_vocabulary_version"])
+        self.assertEqual(candidate["income_model_version"], baseline["income_model_version"])
+        self.assertEqual(candidate["geography_model_version"], 2)
+        self.assertEqual(baseline["geography_model_version"], 1)
+        self.assertNotIn(candidate["purpose"], {"approved", "default", "production"})
+        baseline_ctgan = {key: value for key, value in baseline["ctgan"].items() if key != "geography_model_version"}
+        candidate_ctgan = {key: value for key, value in candidate["ctgan"].items() if key != "geography_model_version"}
+        self.assertEqual(candidate_ctgan, baseline_ctgan)
 
     def test_three_model_roles_remain_registered(self) -> None:
         catalog = model_catalog_by_name()

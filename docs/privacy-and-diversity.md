@@ -52,3 +52,18 @@ Essa separação evita atribuir ao modelo neural uma qualidade criada pelo pipel
 A confirmação independente da CTGAN candidate_c com `income_model_version = 3` concluiu três seeds de confirmação sem duplicidade de combinações-base e sem correspondência exata com treino. Esses resultados apoiam a classificação `recommended_candidate`, mas não aprovam automaticamente o artefato nem garantem anonimização.
 
 As evidências continuam sanitizadas. Artefatos como `duplicate_base_rows.json`, `exact_train_matches.json` e `exact_holdout_matches.json` registram hashes, contagens e índices, sem expor nomes, CPF, telefone, documentos ou linhas completas.
+
+## Diversidade geográfica
+
+A representação `geography_model_version = 2` introduz métricas específicas para a chave interna `Geo_Key`, sem alterar as colunas exportadas. Essas métricas avaliam se a coerência geográfica foi preservada e se a distribuição não colapsou em poucas combinações.
+
+Métricas principais:
+
+- `geography_key_coverage`: proporção das chaves geográficas canônicas observadas na amostra;
+- `geography_key_unique_count`: quantidade de chaves distintas observadas;
+- `geography_key_duplicate_rate`: taxa de repetição de chaves, usada como indicador de concentração;
+- `state_coverage`, `municipality_coverage` e `ddd_coverage`: cobertura marginal dos componentes geográficos;
+- `region_distribution_tvd`, `state_distribution_tvd`, `municipality_distribution_tvd` e `geography_key_distribution_tvd`: distância de variação total entre referência e sintético;
+- `rare_geography_key_coverage`: cobertura de combinações geográficas raras.
+
+Na confirmação `ctgan-income-v3-geo-v2-confirmation-20260730T012716Z-d44f6686`, a cobertura de `Geo_Key`, estados, municípios e DDDs foi 100% nas três seeds. A TVD de `Geo_Key` ficou entre 0,098 e 0,111. Assim, a chave composta eliminou a incoerência geográfica bruta observada na representação independente, mas a distribuição geográfica continua sendo avaliada separadamente.

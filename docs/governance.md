@@ -153,3 +153,13 @@ A investigação diagnóstica da CTGAN income v3 `recommended_candidate` formali
 As métricas de distância de renda devem distinguir `wasserstein_distance_absolute_brl`, expresso em reais, de `wasserstein_distance_normalized`, normalizado pela escala da referência. A distância absoluta não deve ser apresentada sem unidade.
 
 Na CTGAN income v3 diagnosticada, a dependência do pós-processamento foi classificada como `alta`: a validade final foi 100%, mas a validade bruta global ficou próxima de 0,2% devido principalmente a relações geográficas incompatíveis. Essa classificação não promove nem reprova o artefato; ela informa o grau de dependência do pipeline antes de qualquer decisão de aprovação.
+
+## Representação geográfica e governança
+
+Artefatos CTGAN podem registrar `geography_model_version`. A versão histórica (`1`) usa as colunas `Regiao`, `Estado`, `Municipio` e `DDD` como categorias independentes. A versão `2` usa `Geo_Key`, uma chave interna composta que representa combinações sintéticas permitidas dessas quatro colunas.
+
+Na interface e nos relatórios de governança, `Geo_Key` deve ser tratado como metadado técnico do modelo, não como coluna exportável. O dataset público continua usando o schema externo canônico. Quando disponível, o manifesto do modelo também deve informar `geography_catalog_version`, `geography_catalog_checksum` e a finalidade do artefato.
+
+A confirmação do perfil `ctgan_income_v3_geo_v2_candidate` nas seeds `47`, `48` e `49` apresentou validade geográfica raw de 100%, cobertura de estados, municípios e DDDs de 100%, duplicidade-base igual a zero e match exato com treino igual a zero. A TVD de `Geo_Key` ficou entre 0,098 e 0,111, portanto a coerência geográfica melhorou sem eliminar a necessidade de monitorar diversidade.
+
+O artefato `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` permanece com finalidade `recommended_candidate`. Esse status indica candidato técnico para avaliação posterior; não significa aprovação institucional, modelo padrão ou uso em produção.

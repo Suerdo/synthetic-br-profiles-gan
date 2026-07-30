@@ -165,3 +165,28 @@ A distância de Wasserstein da renda passou a ser registrada em duas escalas:
 A dependência do pós-processamento foi classificada como `alta`, com critérios explícitos: validade bruta global abaixo de 50% e taxa de linhas selecionadas com reparo próxima de 99%. Ela não foi classificada como `crítica` porque a taxa de rejeição ficou abaixo de 20%.
 
 Esse diagnóstico não promove nem descarta o artefato. Ele mostra que a CTGAN candidate_c aprendeu adequadamente categorias individuais e relações profissionais, mas depende fortemente do pós-processamento para coerência geográfica e validade estrutural final.
+
+## Refinamento geográfico da CTGAN
+
+Depois do diagnóstico de validade bruta, foi avaliada uma representação geográfica neural específica para a CTGAN. A versão histórica, `geography_model_version = 1`, treinava `Regiao`, `Estado`, `Municipio` e `DDD` como colunas categóricas independentes. Essa estratégia permitia valores conhecidos em combinações inválidas, especialmente em `Estado × Municipio` e `Estado × DDD`.
+
+A versão `geography_model_version = 2` substitui essas quatro colunas, apenas dentro do treinamento da CTGAN, por `Geo_Key`, uma chave categórica composta e determinística. A chave é decodificada logo após a amostragem e não aparece no schema externo. O perfil `ctgan_income_v3_geo_v2_candidate` preservou os hiperparâmetros da CTGAN candidate_c e alterou somente essa representação geográfica.
+
+Configurações executadas:
+
+- `configs/benchmark-ctgan-income-v3-geo-v2-smoke.yaml`;
+- `configs/benchmark-ctgan-income-v3-geo-v2-confirmation.yaml`.
+
+A confirmação independente usou seeds `47`, `48` e `49`, treino de 20.000 registros, holdout de 5.000 registros e 20.000 registros sintéticos por seed. As três execuções foram `approved` nos gates obrigatórios.
+
+| Seed | Validade geográfica raw | Validade global raw | TVD de `Geo_Key` | Cobertura de ocupações | Wasserstein renda norm. | Duplicidade-base | Match treino |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 47 | 100,00% | 91,56% | 0,104 | 100,00% | 0,087 | 0,000 | 0,000 |
+| 48 | 100,00% | 94,84% | 0,098 | 97,30% | 0,190 | 0,000 | 0,000 |
+| 49 | 100,00% | 96,85% | 0,111 | 100,00% | 0,259 | 0,000 | 0,000 |
+
+Na seed `48`, a ocupação ausente foi `Diretor`, uma categoria rara. Não houve categorias finais desconhecidas nem incompatibilidades finais de ocupação com escolaridade ou idade.
+
+O pós-processamento geográfico deixou de ser necessário nas linhas selecionadas: em cada seed, as 20.000 linhas permaneceram com geografia inalterada, sem reparo, substituição ou rejeição por geografia. Ainda ocorreram alterações por outros motivos, principalmente regras numéricas e profissionais, em 1.689, 1.033 e 631 linhas nas seeds `47`, `48` e `49`, respectivamente.
+
+O artefato gerado em `artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/` possui finalidade `recommended_candidate`. Ele não é `approved`, `default` nem `production`; uma eventual aprovação futura exige decisão explícita.

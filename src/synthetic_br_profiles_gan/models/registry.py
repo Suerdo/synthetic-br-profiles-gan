@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from synthetic_br_profiles_gan.domain.geography import LEGACY_GEOGRAPHY_MODEL_VERSION
 from synthetic_br_profiles_gan.exceptions import ModelSerializationError
 from synthetic_br_profiles_gan.localization import (
     CATEGORICAL_VOCABULARY_VERSION,
@@ -71,6 +72,10 @@ class SavedModelArtifact:
     is_legacy_vocabulary: bool
     compatibility_normalization_required: bool
     manifest: dict[str, Any]
+    geography_model_version: int = LEGACY_GEOGRAPHY_MODEL_VERSION
+    geography_catalog_version: int | None = None
+    geography_catalog_checksum: str | None = None
+    is_legacy_geography_model: bool = False
 
 
 def load_training_manifest(model_path: str | Path) -> dict[str, Any]:
@@ -124,6 +129,7 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
             continue
         vocabulary_version = _optional_int(manifest.get("categorical_vocabulary_version")) or 1
         income_model_version = _optional_int(manifest.get("income_model_version")) or 1
+        geography_model_version = _optional_int(manifest.get("geography_model_version")) or LEGACY_GEOGRAPHY_MODEL_VERSION
         artifacts.append(
             SavedModelArtifact(
                 model=artifact_model,
@@ -145,6 +151,10 @@ def list_saved_model_artifacts(models_root: str | Path, model: str | None = None
                 is_legacy_vocabulary=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 compatibility_normalization_required=bool(vocabulary_version < CATEGORICAL_VOCABULARY_VERSION),
                 manifest=manifest,
+                geography_model_version=geography_model_version,
+                geography_catalog_version=_optional_int(manifest.get("geography_catalog_version")),
+                geography_catalog_checksum=manifest.get("geography_catalog_checksum"),
+                is_legacy_geography_model=bool(geography_model_version < 2),
             )
         )
     artifacts.sort(key=lambda item: (item.model, item.created_at_utc or "", item.artifact_id))

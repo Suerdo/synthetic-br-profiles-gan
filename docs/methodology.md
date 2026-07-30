@@ -113,3 +113,13 @@ O diagnóstico também separa `repair`, `replacement` e `rejection`. `repair` in
 As regras avaliadas separadamente incluem categorias conhecidas, domínios de idade, renda e dependentes, relações `Regiao × Estado`, `Estado × Municipio`, `Estado × DDD`, `Ocupacao × Escolaridade`, `Ocupacao × Idade`, `Estado_Civil × Idade`, validade geográfica conjunta, validade profissional conjunta, validade não relacional e validade estrutural global.
 
 A validade global bruta é a interseção das regras. Por isso, ela pode ser muito menor do que a validade de cada bloco isolado. Na CTGAN income v3, categorias individuais e relações profissionais tiveram alta validade, enquanto as relações geográficas conjuntas concentraram as falhas brutas.
+
+### Representação geográfica neural
+
+A representação histórica da CTGAN, `geography_model_version = 1`, treinava `Regiao`, `Estado`, `Municipio` e `DDD` como colunas independentes. Como essas colunas formam uma hierarquia, o modelo podia produzir valores conhecidos em combinações incompatíveis.
+
+A nova representação `geography_model_version = 2` usa a coluna interna `Geo_Key`, derivada deterministicamente das fontes canônicas `REGION_STATES`, `STATE_MUNICIPALITIES` e `STATE_DDDS`. Durante o treinamento da CTGAN, `Geo_Key` substitui as quatro colunas geográficas; depois da amostragem, a chave é validada, decodificada e removida da saída pública. O contrato externo das 11 colunas-base permanece inalterado.
+
+O catálogo atual contém 201 chaves e checksum `0b12f8466842767c637a37cbff3939d730c1a06c87770c0846cfdeebd8ccf033`. Como a fonte local relaciona DDDs permitidos por estado, a chave representa combinações sintéticas permitidas pelo projeto, não uma validação oficial de DDD por município.
+
+O perfil `ctgan_income_v3_geo_v2_candidate` preserva os hiperparâmetros da CTGAN candidate_c e altera apenas a representação geográfica neural. A confirmação nas seeds `47`, `48` e `49` mostrou validade geográfica bruta de 100%, cobertura completa de `Geo_Key`, zero duplicidade-base e zero correspondência exata com treino. O artefato resultante permanece `recommended_candidate`, sem aprovação automática.

@@ -265,6 +265,7 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
             "discriminator_steps",
             "log_frequency",
             "pac",
+            "geography_model_version",
         }
         _reject_unknown(config, allowed, "models.ctgan")
         for key in ["epochs", "batch_size"]:
@@ -280,6 +281,10 @@ def validate_model_config(model_name: str, config: ConfigDict) -> None:
         for key in ["embedding_dim", "discriminator_steps", "pac"]:
             if config.get(key) is not None:
                 _require_positive_int(config, key, "models.ctgan")
+        if "geography_model_version" in config:
+            _require_positive_int(config, "geography_model_version", "models.ctgan")
+            if int(config["geography_model_version"]) not in {1, 2}:
+                raise ConfigurationError("models.ctgan.geography_model_version must be 1 or 2.")
         for key in ["generator_lr", "discriminator_lr", "generator_decay", "discriminator_decay"]:
             if config.get(key) is not None and float(config[key]) < 0:
                 raise ConfigurationError(f"models.ctgan.{key} must be non-negative.")
@@ -356,6 +361,7 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
                 "discriminator_steps",
                 "log_frequency",
                 "pac",
+                "geography_model_version",
             }
             _reject_unknown(model_config, allowed, f"{context}.ctgan")
             for key in ["seed", "epochs", "batch_size"]:
@@ -373,6 +379,10 @@ def _validate_benchmark_model_overrides(config: ConfigDict, context: str = "mode
             for key in ["embedding_dim", "discriminator_steps", "pac"]:
                 if model_config.get(key) is not None:
                     _require_positive_int(model_config, key, f"{context}.ctgan")
+            if "geography_model_version" in model_config:
+                _require_positive_int(model_config, "geography_model_version", f"{context}.ctgan")
+                if int(model_config["geography_model_version"]) not in {1, 2}:
+                    raise ConfigurationError(f"{context}.ctgan.geography_model_version must be 1 or 2.")
             for key in ["generator_lr", "discriminator_lr", "generator_decay", "discriminator_decay"]:
                 if model_config.get(key) is not None and float(model_config[key]) < 0:
                     raise ConfigurationError(f"{context}.ctgan.{key} must be non-negative.")

@@ -18,6 +18,12 @@ from synthetic_br_profiles_gan.calibration import (
     split_train_holdout,
 )
 from synthetic_br_profiles_gan.config import ConfigDict, deep_merge, save_yaml_config
+from synthetic_br_profiles_gan.domain.geography import (
+    GEOGRAPHY_CATALOG_VERSION,
+    GEOGRAPHY_MODEL_VERSION,
+    LEGACY_GEOGRAPHY_MODEL_VERSION,
+    geography_catalog_checksum,
+)
 from synthetic_br_profiles_gan.exceptions import ConfigurationError
 from synthetic_br_profiles_gan.manifest import environment_info, get_git_commit, write_json
 from synthetic_br_profiles_gan.metadata import DatasetMetadata, default_metadata
@@ -170,6 +176,14 @@ def build_training_manifest(
         "unicode_normalization": UNICODE_NORMALIZATION,
         "categorical_vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
         "income_model_version": _income_model_version_from_config(config),
+        "geography_model_version": _geography_model_version_from_config(model, config),
+        "geography_generation_strategy": "direct_rules" if model == "programmatic" else "model_columns",
+        "geography_catalog_version": (
+            GEOGRAPHY_CATALOG_VERSION if _geography_model_version_from_config(model, config) == GEOGRAPHY_MODEL_VERSION else None
+        ),
+        "geography_catalog_checksum": (
+            geography_catalog_checksum() if _geography_model_version_from_config(model, config) == GEOGRAPHY_MODEL_VERSION else None
+        ),
         "seed": int(seed),
         "training_required": bool(training_required),
         "train_rows": int(train_rows),
@@ -296,3 +310,13 @@ def _income_model_version_from_config(config: dict[str, Any]) -> int:
         return int(calibration.get("income_model_version", INCOME_MODEL_VERSION))
     except (AttributeError, TypeError, ValueError):
         return INCOME_MODEL_VERSION
+
+
+def _geography_model_version_from_config(model: str, config: dict[str, Any]) -> int:
+    if model != "ctgan":
+        return LEGACY_GEOGRAPHY_MODEL_VERSION
+    try:
+        model_config = config.get("models", {}).get("ctgan", {})
+        return int(model_config.get("geography_model_version", LEGACY_GEOGRAPHY_MODEL_VERSION))
+    except (AttributeError, TypeError, ValueError):
+        return LEGACY_GEOGRAPHY_MODEL_VERSION

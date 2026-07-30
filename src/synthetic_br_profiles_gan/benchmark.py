@@ -235,6 +235,27 @@ RUN_SUMMARY_COLUMNS = [
     "unicode_nfc_valid_raw",
     "unicode_nfc_valid_final",
     "vocabulary_quality_gate_status",
+    "geography_model_version",
+    "known_geography_key_rate_raw",
+    "raw_geographic_validity_rate",
+    "final_geographic_validity_rate",
+    "raw_professional_validity_rate",
+    "final_professional_validity_rate",
+    "raw_non_relational_validity_rate",
+    "final_non_relational_validity_rate",
+    "geography_key_coverage_raw",
+    "geography_key_coverage_final",
+    "geography_key_distribution_tvd_raw",
+    "geography_key_distribution_tvd_final",
+    "state_coverage",
+    "municipality_coverage",
+    "ddd_coverage",
+    "geography_unchanged_rows",
+    "geography_modified_rows",
+    "geography_repaired_rows",
+    "geography_replaced_rows",
+    "geography_rejected_rows",
+    "other_modified_rows",
 ]
 CAPACITY_RESULT_COLUMNS = [
     "benchmark_id",
@@ -1984,6 +2005,8 @@ def _sample_raw_synthesizer_output(
         from synthetic_br_profiles_gan.models.ctgan import CTGANSynthesizer
 
         synthesizer = CTGANSynthesizer.load(model_path)
+        if getattr(synthesizer, "geography_model_version", 1) == 2:
+            return synthesizer.sample(int(rows))
         if getattr(synthesizer, "model", None) is not None:
             sampled = synthesizer.model.sample(int(rows))
             return sampled[[column for column in metadata.model_columns if column in sampled.columns]].copy()
@@ -2028,6 +2051,11 @@ def summarize_run(
     exact_matches = privacy.get("exact_matches") if isinstance(privacy.get("exact_matches"), dict) else {}
     exact_train = exact_matches.get("train") if isinstance(exact_matches.get("train"), dict) else {}
     exact_holdout = exact_matches.get("holdout") if isinstance(exact_matches.get("holdout"), dict) else {}
+    geography = evaluation.get("geography", {}) if isinstance(evaluation.get("geography"), dict) else {}
+    geography_validity = geography.get("validity", {}) if isinstance(geography.get("validity"), dict) else {}
+    geography_diversity = geography.get("diversity", {}) if isinstance(geography.get("diversity"), dict) else {}
+    raw_final = result.get("raw_final_comparison", {}) if isinstance(result.get("raw_final_comparison"), dict) else {}
+    postprocessing_geography = raw_final.get("postprocessing_geography", {}) if isinstance(raw_final.get("postprocessing_geography"), dict) else {}
     return {
         "benchmark_id": benchmark_id,
         "run_id": result["run_id"],
@@ -2100,6 +2128,30 @@ def summarize_run(
         "unicode_nfc_valid_raw": locale.get("unicode_nfc_valid_raw"),
         "unicode_nfc_valid_final": locale.get("unicode_nfc_valid_final"),
         "vocabulary_quality_gate_status": vocabulary_gates.get("status"),
+        "geography_model_version": manifest.get("geography_model_version"),
+        "raw_structural_validity_rate": raw_final.get("raw_structural_validity_rate"),
+        "final_structural_validity_rate": raw_final.get("final_structural_validity_rate"),
+        "known_geography_key_rate_raw": raw_final.get("known_geography_key_rate_raw"),
+        "raw_geographic_validity_rate": raw_final.get("raw_geographic_validity_rate"),
+        "final_geographic_validity_rate": raw_final.get("final_geographic_validity_rate") or geography_validity.get("raw_geographic_validity_rate"),
+        "raw_professional_validity_rate": raw_final.get("raw_professional_validity_rate"),
+        "final_professional_validity_rate": raw_final.get("final_professional_validity_rate"),
+        "raw_non_relational_validity_rate": raw_final.get("raw_non_relational_validity_rate"),
+        "final_non_relational_validity_rate": raw_final.get("final_non_relational_validity_rate"),
+        "geography_key_coverage_raw": raw_final.get("geography_key_coverage_raw"),
+        "geography_key_coverage_final": raw_final.get("geography_key_coverage_final") or geography_diversity.get("geography_key_coverage"),
+        "geography_key_distribution_tvd_raw": raw_final.get("geography_key_distribution_tvd_raw"),
+        "geography_key_distribution_tvd_final": raw_final.get("geography_key_distribution_tvd_final")
+        or geography_diversity.get("geography_key_distribution_tvd"),
+        "state_coverage": geography_diversity.get("state_coverage"),
+        "municipality_coverage": geography_diversity.get("municipality_coverage"),
+        "ddd_coverage": geography_diversity.get("ddd_coverage"),
+        "geography_unchanged_rows": postprocessing_geography.get("geography_unchanged_rows"),
+        "geography_modified_rows": postprocessing_geography.get("geography_modified_rows"),
+        "geography_repaired_rows": postprocessing_geography.get("geography_repaired_rows"),
+        "geography_replaced_rows": postprocessing_geography.get("geography_replaced_rows"),
+        "geography_rejected_rows": postprocessing_geography.get("geography_rejected_rows"),
+        "other_modified_rows": postprocessing_geography.get("other_modified_rows"),
     }
 
 
@@ -2222,6 +2274,58 @@ def flatten_run_metrics(
     add("privacy", "nndr_train_mean", None, nndr.get("mean"))
     add("privacy", "columns_used", None, len(privacy.get("columns_used", [])), details=privacy.get("columns_used", []))
     add("privacy", "columns_excluded", None, len(privacy.get("excluded_columns", [])), details=privacy.get("excluded_columns", []))
+
+    geography = evaluation.get("geography", {}) if isinstance(evaluation.get("geography"), dict) else {}
+    for section_name in ["validity", "diversity"]:
+        section = geography.get(section_name, {}) if isinstance(geography.get(section_name), dict) else {}
+        for metric_name, value in section.items():
+            if isinstance(value, (dict, list, tuple)):
+                add("geography", metric_name, section_name, None, details=value)
+            else:
+                add("geography", metric_name, section_name, value)
+    relational = evaluation.get("relational_validity", {}) if isinstance(evaluation.get("relational_validity"), dict) else {}
+    for section_name in ["validity", "invalid_counts", "top_invalid_combinations"]:
+        section = relational.get(section_name, {}) if isinstance(relational.get(section_name), dict) else {}
+        for metric_name, value in section.items():
+            if isinstance(value, (dict, list, tuple)):
+                add("relational_validity", metric_name, section_name, None, details=value)
+            else:
+                add("relational_validity", metric_name, section_name, value)
+    raw_final = result.get("raw_final_comparison", {}) if isinstance(result.get("raw_final_comparison"), dict) else {}
+    for metric_name in [
+        "known_geography_key_rate_raw",
+        "known_geography_key_rate_final",
+        "raw_geographic_validity_rate",
+        "final_geographic_validity_rate",
+        "raw_professional_validity_rate",
+        "final_professional_validity_rate",
+        "raw_non_relational_validity_rate",
+        "final_non_relational_validity_rate",
+        "state_municipality_valid_rate_raw",
+        "state_ddd_valid_rate_raw",
+        "region_state_valid_rate_raw",
+        "geography_key_coverage_raw",
+        "geography_key_coverage_final",
+        "geography_key_distribution_tvd_raw",
+        "geography_key_distribution_tvd_final",
+    ]:
+        add("raw_final_geography", metric_name, None, raw_final.get(metric_name))
+    postprocessing_geography = raw_final.get("postprocessing_geography", {}) if isinstance(raw_final.get("postprocessing_geography"), dict) else {}
+    for metric_name in [
+        "geography_unchanged_rows",
+        "geography_modified_rows",
+        "geography_repaired_rows",
+        "geography_replaced_rows",
+        "geography_rejected_rows",
+        "other_modified_rows",
+        "multiple_geography_field_change_rows",
+    ]:
+        add("postprocessing_geography", metric_name, None, postprocessing_geography.get(metric_name))
+    field_changes = postprocessing_geography.get("field_changes", {}) if isinstance(postprocessing_geography.get("field_changes"), dict) else {}
+    for column, payload in field_changes.items():
+        if isinstance(payload, dict):
+            add("postprocessing_geography", "field_modified_rows", column, payload.get("modified_rows"))
+            add("postprocessing_geography", "field_modified_rate", column, payload.get("modified_rate"))
 
     reason_counts = validation.get("reason_counts", {})
     add("validation", "invalid_rows", None, validation.get("invalid_rows"))

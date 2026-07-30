@@ -773,3 +773,42 @@ Nas seeds `44` e `45`, a ocupação ausente entre as linhas selecionadas foi `Di
 A distância de Wasserstein da renda foi registrada em BRL e normalizada pelo IQR da referência. No resultado final, os valores absolutos foram R$ 434,71, R$ 238,31 e R$ 159,06 para as seeds `44`, `45` e `46`, respectivamente; os valores normalizados foram 0,203, 0,114 e 0,075.
 
 Esse diagnóstico não promove nem descarta o artefato. Ele apenas formaliza a semântica das métricas e evidencia a dependência do pós-processamento antes de qualquer decisão futura de aprovação da CTGAN.
+
+### Representação geográfica composta da CTGAN
+
+Após o diagnóstico da validade bruta, foi avaliada uma nova representação geográfica para a CTGAN. A representação histórica, `geography_model_version = 1`, tratava `Regiao`, `Estado`, `Municipio` e `DDD` como categorias independentes. A nova representação, `geography_model_version = 2`, usa a chave interna `Geo_Key` para codificar a combinação sintética permitida dessas quatro colunas.
+
+A comparação foi desenhada para isolar a mudança geográfica. O perfil `ctgan_income_v3_geo_v2_candidate` preservou os hiperparâmetros da `ctgan_income_v3_recommended_candidate` e alterou apenas a representação de treinamento das colunas geográficas. O schema externo continuou usando as 11 colunas-base canônicas.
+
+Configurações criadas:
+
+- `configs/benchmark-ctgan-income-v3-geo-v2-smoke.yaml`;
+- `configs/benchmark-ctgan-income-v3-geo-v2-confirmation.yaml`.
+
+O smoke foi concluído com `benchmark_id` `ctgan-income-v3-geo-v2-smoke-20260730T012656Z-5724437d`. A confirmação independente foi concluída com `benchmark_id` `ctgan-income-v3-geo-v2-confirmation-20260730T012716Z-d44f6686`, usando seeds `47`, `48` e `49`, treino de 20.000 registros, holdout de 5.000 registros e 20.000 registros sintéticos por seed.
+
+| Seed | Status | Validade geográfica raw | Validade global raw | Validade profissional raw | Cobertura de `Geo_Key` | Duplicidade-base | Match treino | Pico RSS |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 47 | `approved` | 100,00% | 91,56% | 91,59% | 100,00% | 0,000 | 0,000 | 3.972 MB |
+| 48 | `approved` | 100,00% | 94,84% | 94,90% | 100,00% | 0,000 | 0,000 | 4.064 MB |
+| 49 | `approved` | 100,00% | 96,85% | 96,85% | 100,00% | 0,000 | 0,000 | 4.040 MB |
+
+A validade geográfica raw subiu de 0,19%-0,31% na representação independente para 100% com `Geo_Key`. A validade global raw subiu de 0,18%-0,29% para 91,56%-96,85%. Os quality gates obrigatórios passaram nas três seeds, sem duplicidade de identificadores, sem linhas finais inválidas, sem duplicidade-base e sem correspondência exata com treino.
+
+A diversidade geográfica também foi monitorada. A cobertura de estados, municípios e DDDs foi 100% nas três seeds. A TVD de `Geo_Key` ficou entre 0,098 e 0,111; portanto, a chave composta resolveu a coerência bruta, mas não deve ser interpretada como garantia de distribuição geográfica perfeita.
+
+O resumo de pós-processamento geográfico mostrou que as 20.000 linhas selecionadas em cada seed permaneceram geograficamente inalteradas. Não houve reparo, substituição ou rejeição por geografia; as alterações restantes ocorreram por outros motivos, como ajuste de domínios numéricos e relações profissionais:
+
+| Seed | Geografia inalterada | Geografia reparada | Geografia substituída | Rejeição por geografia | Alterações por outros motivos |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 47 | 20.000 | 0 | 0 | 0 | 1.689 |
+| 48 | 20.000 | 0 | 0 | 0 | 1.033 |
+| 49 | 20.000 | 0 | 0 | 0 | 631 |
+
+Artefato candidato produzido:
+
+```text
+artifacts/models/ctgan/20260730T013320Z-income-v3-geo-v2-candidate/
+```
+
+Finalidade: `recommended_candidate`. Esse status não representa `approved`, `default` ou `production`.

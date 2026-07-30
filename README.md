@@ -426,7 +426,11 @@ A avaliação diferencia duplicidade de combinações-base, correspondência exa
 
 O refinamento `income_model_version = 3` ajusta apenas parâmetros sintéticos de dispersão e cauda da renda, sem alterar o vocabulário categórico versão 2 nem usar gênero no cálculo. A CTGAN candidate_c foi confirmada em seeds independentes `44`, `45` e `46` e gerou um artefato `recommended_candidate`, ainda sem status `approved`, `default` ou `production`.
 
-Consulte `docs/privacy-and-diversity.md` e `docs/income-realism.md` para a representação canônica, os artefatos, os quality gates e as limitações de interpretação.
+A CTGAN também passou a ter uma representação geográfica neural opcional, `geography_model_version = 2`, baseada na chave interna `Geo_Key`. Ela codifica combinações permitidas de `Regiao`, `Estado`, `Municipio` e `DDD` durante o treinamento e é decodificada antes da saída pública. O schema externo permanece inalterado.
+
+A confirmação independente do perfil `ctgan_income_v3_geo_v2_candidate` nas seeds `47`, `48` e `49` elevou a validade geográfica bruta de aproximadamente 0,19%-0,31% na representação independente para 100% com `Geo_Key`. O artefato gerado permanece `recommended_candidate`, sem promoção automática para `approved`, `default` ou `production`.
+
+Consulte `docs/privacy-and-diversity.md`, `docs/income-realism.md` e `docs/geography-model.md` para a representação canônica, os artefatos, os quality gates e as limitações de interpretação.
 
 ## Testes
 
