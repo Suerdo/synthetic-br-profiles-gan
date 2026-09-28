@@ -420,6 +420,34 @@ A página de governança lê manifestos, histórico de modelos, validações, qu
 
 Ao selecionar `ctgan`, o `ModelRegistry` prioriza explicitamente o artefato `approved` com `recommended_for_neural_generation = true`. Os demais artefatos tecnicamente válidos continuam disponíveis para seleção manual. Recência continua sendo usada apenas como critério secundário dentro do mesmo nível de recomendação; “mais recente” não significa automaticamente melhor qualidade.
 
+## Interface React e API
+
+O projeto também possui uma primeira versão do frontend React + TypeScript + Vite, servida separadamente da API FastAPI opcional. A interface Streamlit permanece disponível; esta fase apenas adiciona uma alternativa web desacoplada.
+
+Instalar a API:
+
+```bash
+pip install -e ".[api]"
+```
+
+Iniciar a API:
+
+```bash
+python -m uvicorn synthetic_br_profiles_gan.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Iniciar o React:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+A API expõe apenas metadados, artefatos administrados e geração assíncrona. O contrato HTTP usa `artifact_id` para modelos neurais e não aceita `model_path` nem `output_path` enviados pelo cliente. Cada geração exige `X-UI-Session-ID`, criado de forma efêmera pelo React e não persistido em storage ou cookie.
+
+Consulte `docs/api.md` e `docs/react-frontend.md`.
+
 ## Diversidade, memorização e renda condicional
 
 A avaliação diferencia duplicidade de combinações-base, correspondência exata com treino, correspondência exata com holdout e realismo condicional da renda. Essas métricas usam as 11 colunas-base do modelo e excluem identificadores derivados como CPF, telefone e documentos.

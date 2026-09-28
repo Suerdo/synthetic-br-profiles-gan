@@ -171,3 +171,13 @@ A interface apresenta métricas de duplicidade de combinações-base, correspond
 Quando uma execução foi criada antes dessas métricas, o valor aparece como `Não avaliado`. Zero é exibido somente quando o artefato registra zero real.
 
 Esses indicadores usam as colunas-base do modelo e excluem identificadores derivados. Eles apoiam avaliação de risco e qualidade, mas não garantem anonimização nem conformidade regulatória.
+
+## Interface React experimental
+
+A primeira fase da interface React + TypeScript + Vite foi adicionada sem remover a interface Streamlit. O React usa uma API FastAPI opcional, documentada em `docs/api.md`, e continua reutilizando `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação e manifestos.
+
+A navegação React possui três páginas: `Gerar dados`, `Modelos` e `Governança`. A página inicial é `Gerar dados`.
+
+A API não aceita caminhos arbitrários de modelo ou saída. Modelos neurais são selecionados por `artifact_id` entre os artefatos válidos listados pelo `ModelRegistry`; o cliente não envia `model_path`. Cada geração recebe um `X-UI-Session-ID` efêmero criado em memória pelo React e os arquivos são gravados em `artifacts/web_sessions/<ui-session-id>/<generation-id>/`.
+
+Essa fase não implementa treinamento pela interface, upload de modelos, histórico persistente, autenticação, banco de dados ou filas externas. A documentação operacional da nova interface está em `docs/react-frontend.md`.
