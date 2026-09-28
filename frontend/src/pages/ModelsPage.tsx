@@ -80,7 +80,7 @@ function ModelCard({ entry, active, onSelect }: { entry: ModelEntry; active: boo
       </div>
       <h2 className="mt-4 text-xl font-bold text-slateInk">{cleanModelName(entry)}</h2>
       <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{entry.short_description}</p>
-      <dl className="mt-4 space-y-2 text-sm">
+      <dl className="mt-4 space-y-2.5 text-sm">
         <CardLine label="Disponibilidade" value={entry.available ? "Disponível" : "Não disponível"} />
         <CardLine label="Indicação principal" value={entry.recommended_use_cases.slice(0, 2).join(", ") || "Não avaliado"} />
         <CardLine label="Versões" value={version} />
@@ -115,7 +115,7 @@ function ModelDetails({ entry }: { entry: ModelEntry }) {
       </div>
       <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600">{entry.detailed_description}</p>
 
-      <div className="mt-5 grid items-stretch gap-4 md:grid-cols-2">
+      <div className="mt-5 grid items-stretch gap-3 md:grid-cols-2">
         <SummaryCard title="Resumo Simples">{entry.simple_summary || entry.summary}</SummaryCard>
         <SummaryCard title="Resumo Técnico">{entry.technical_summary}</SummaryCard>
       </div>
@@ -224,9 +224,9 @@ function ArtifactPanel({
 
 function SummaryCard({ title, children }: { title: string; children: string }) {
   return (
-    <div className="h-full min-h-[190px] rounded-xl border border-borderSoft bg-panel p-4">
-      <h3 className="font-bold text-slateInk">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{children || "Não avaliado"}</p>
+    <div className="h-full min-h-[112px] rounded-xl border border-borderSoft bg-panel p-3.5">
+      <h3 className="text-sm font-bold text-slateInk">{title}</h3>
+      <p className="mt-2 text-sm leading-5 text-slate-600">{children || "Não avaliado"}</p>
     </div>
   );
 }
@@ -262,9 +262,9 @@ function Summary({ label, value }: { label: string; value: string }) {
 
 function CardLine({ label, value, technical = false }: { label: string; value: string; technical?: boolean }) {
   return (
-    <div className="grid min-w-0 gap-1 sm:grid-cols-[auto_minmax(0,1fr)]">
+    <div className="grid min-w-0 grid-cols-[minmax(7.25rem,8.75rem)_minmax(0,1fr)] items-start gap-x-3 gap-y-1">
       <dt className="text-slate-500">{label}</dt>
-      <dd className="min-w-0 text-left font-semibold text-slateInk sm:text-right">
+      <dd className="min-w-0 text-left font-semibold leading-5 text-slateInk">
         {technical || isTechnicalValue(label, value) ? <TechnicalValue value={value} copyable={false} /> : value}
       </dd>
     </div>
