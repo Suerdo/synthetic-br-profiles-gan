@@ -25,6 +25,7 @@ class ApiSettings:
     models_root: Path = Path("artifacts/models")
     web_sessions_root: Path = Path("artifacts/web_sessions")
     artifacts_root: Path = Path("artifacts")
+    audit_events_path: Path = Path("artifacts/ui_audit/events.jsonl")
     default_rows: int = 1000
     min_rows: int = 1
     row_limits: dict[str, int] = field(
@@ -34,6 +35,7 @@ class ApiSettings:
     default_preset: str = "completo"
     default_format: str = "csv"
     default_seed: int = 41
+    approved_model_artifacts: dict[str, tuple[str, ...]] = field(default_factory=lambda: {"ctgan": (), "simple_gan": ()})
     cors_origins: tuple[str, ...] = DEFAULT_CORS_ORIGINS
     max_workers: int = 1
 
@@ -49,6 +51,9 @@ def load_api_settings(path: str | Path = "configs/ui.yaml") -> ApiSettings:
     generation = _mapping(config.get("generation", {}), "generation")
     defaults = _mapping(config.get("defaults", {}), "defaults")
     limits = _mapping(generation.get("limits", {}), "generation.limits")
+    audit = _mapping(config.get("audit", {}), "audit")
+    model_artifacts = _mapping(config.get("model_artifacts", {}), "model_artifacts")
+    approved = _mapping(model_artifacts.get("approved", {}), "model_artifacts.approved")
 
     cors_origins = _cors_origins_from_environment()
     settings = ApiSettings(
@@ -57,6 +62,7 @@ def load_api_settings(path: str | Path = "configs/ui.yaml") -> ApiSettings:
         models_root=Path(str(application.get("models_root", "artifacts/models"))),
         web_sessions_root=Path(str(application.get("web_sessions_root", application.get("sessions_root", "artifacts/web_sessions")))),
         artifacts_root=Path(str(application.get("artifacts_root", "artifacts"))),
+        audit_events_path=Path(str(audit.get("events_path", "artifacts/ui_audit/events.jsonl"))),
         default_rows=_positive_int(generation.get("default_rows", 1000), "generation.default_rows"),
         min_rows=_positive_int(generation.get("min_rows", 1), "generation.min_rows"),
         row_limits={
@@ -67,6 +73,10 @@ def load_api_settings(path: str | Path = "configs/ui.yaml") -> ApiSettings:
         default_preset=str(defaults.get("preset", "completo")),
         default_format=str(defaults.get("format", "csv")).lower(),
         default_seed=_non_negative_int(defaults.get("seed", 41), "defaults.seed"),
+        approved_model_artifacts={
+            model: tuple(str(item) for item in approved.get(model, ()) if str(item))
+            for model in ("ctgan", "simple_gan")
+        },
         cors_origins=cors_origins,
     )
     _validate_settings(settings)

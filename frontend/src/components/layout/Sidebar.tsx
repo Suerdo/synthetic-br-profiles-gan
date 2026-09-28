@@ -2,19 +2,18 @@ import { Database, FileText, Scale } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const items = [
-  { to: "/", label: "Gerar dados", icon: Database },
+  { to: "/", label: "Gerar Dados", icon: Database },
   { to: "/modelos", label: "Modelos", icon: FileText },
   { to: "/governanca", label: "Governança", icon: Scale }
 ];
 
 export function Sidebar() {
   return (
-    <aside className="min-h-screen w-full border-r border-slate-700 bg-slateInk text-slate-100 lg:w-72">
+    <aside className="w-full border-r border-slate-700 bg-slateInk text-slate-100 lg:min-h-screen lg:w-72">
       <div className="px-5 py-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">Dados Sintéticos BR</p>
-        <h1 className="mt-2 text-xl font-bold text-white">Plataforma Web</h1>
+        <h1 className="text-xl font-bold text-white">Dados Sintéticos Brasileiro</h1>
       </div>
-      <nav className="space-y-1 px-3" aria-label="Navegação principal">
+      <nav className="space-y-1 px-3 pb-5" aria-label="Navegação principal">
         {items.map((item) => {
           const Icon = item.icon;
           return (

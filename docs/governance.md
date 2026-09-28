@@ -63,6 +63,24 @@ Cada bloco da página informa a fonte esperada:
 
 Ausência de métrica não é exibida como zero. A interface usa `Não avaliado` e informa que a execução não produziu aquela métrica. Zero é reservado para valores reais registrados como zero.
 
+## Governança na API React
+
+A API FastAPI expõe endpoints específicos para a interface React:
+
+```text
+GET /api/governance
+GET /api/governance/summary
+GET /api/governance/quality
+GET /api/governance/privacy
+GET /api/governance/income
+GET /api/governance/executions
+GET /api/governance/audit
+```
+
+Esses endpoints reutilizam os serviços compartilhados em `synthetic_br_profiles_gan.services` e não dependem de Streamlit. As respostas são agregadas e sanitizadas: não incluem hostname, usuário local, caminhos absolutos, IP, user agent, variáveis de ambiente, caminhos CUDA, stack traces ou valores individuais gerados.
+
+Campos que não existem nos artefatos históricos permanecem como `null` no contrato HTTP. O frontend React converte esses valores para `Não avaliado` e mantém a origem da informação visível para evitar confundir ausência de evidência com valor zero.
+
 ## Glossário dos indicadores
 
 **Execuções registradas:** quantidade de manifestos de execução identificados pela aplicação.

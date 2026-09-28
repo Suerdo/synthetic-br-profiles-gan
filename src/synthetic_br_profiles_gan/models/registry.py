@@ -219,7 +219,7 @@ def load_saved_synthesizer(model_path: str | Path, expected_model: str | None = 
 
 def _artifact_id(root: Path, artifact_path: Path) -> str:
     try:
-        return str(artifact_path.relative_to(root))
+        return artifact_path.relative_to(root).as_posix()
     except ValueError:
         return artifact_path.name
 

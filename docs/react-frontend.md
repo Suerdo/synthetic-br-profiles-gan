@@ -1,6 +1,6 @@
 # Frontend React
 
-Esta primeira fase adiciona uma interface React + TypeScript + Vite sem remover a interface Streamlit. O React reutiliza a API FastAPI, que por sua vez chama os serviços existentes do pacote.
+Esta fase adiciona uma interface React + TypeScript + Vite sem remover a interface Streamlit. O React reutiliza a API FastAPI, que por sua vez chama os serviços existentes do pacote.
 
 ## Instalação
 
@@ -54,6 +54,8 @@ frontend/
 
 A lógica de geração, validação, presets, dependências internas e exportação não fica no React. A interface apenas monta a solicitação, chama a API, acompanha o job assíncrono e apresenta prévia, validação e downloads.
 
+Os serviços reutilizáveis de histórico, governança e auditoria ficam em `synthetic_br_profiles_gan.services`. A camada Streamlit mantém wrappers compatíveis em `synthetic_br_profiles_gan.ui.services`, enquanto a API FastAPI usa os serviços compartilhados diretamente e não depende de Streamlit.
+
 ## Páginas
 
 A navegação possui três páginas:
@@ -63,6 +65,10 @@ A navegação possui três páginas:
 - `Governança`: resumo de rastreabilidade e explicação de indicadores.
 
 `Visão geral` e `Conformidade regulatória` não fazem parte da navegação React.
+
+A página `Modelos` consome `/api/models`, `/api/models/{model}` e `/api/models/{model}/recommended`. Ela apresenta os três sintetizadores, seus papéis, resumos simples e técnicos, usos recomendados, limitações, notas de governança e artefatos válidos. Artefatos ausentes ou métricas não calculadas aparecem como `Não avaliado`.
+
+A página `Governança` consome `/api/governance` e os endpoints seccionados de governança. Ela apresenta `Resumo Operacional`, `Modelo Neural Recomendado`, `Qualidade dos Dados`, `Diversidade e Memorização`, `Realismo Condicional`, `Execuções Recentes`, `Auditoria` e glossário. Os filtros atuam sobre os metadados agregados retornados pela API; o frontend não lê datasets completos nem arquivos do diretório `artifacts/` diretamente.
 
 ## Sessão efêmera
 
@@ -97,7 +103,7 @@ Os nomes de arquivos são descritivos e não expõem caminhos internos.
 
 - Não há histórico persistente;
 - o estado dos jobs fica em memória no servidor;
-- a governança React mostra metadados básicos e explicações, mas ainda não carrega todo o histórico analítico;
+- a governança React depende dos manifestos e artefatos agregados já existentes; execuções antigas sem métricas novas aparecem como `Não avaliado`;
 - não há autenticação;
 - não há banco de dados;
 - não há upload de modelos;

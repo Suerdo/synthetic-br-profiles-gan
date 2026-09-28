@@ -48,9 +48,33 @@ Retorna o catálogo das 18 colunas finais, grupos, dependências internas e pres
 
 Retorna os três modelos, suas descrições, disponibilidade, limites operacionais da interface e o artefato recomendado quando aplicável.
 
+### `GET /api/models/{model}`
+
+Retorna a ficha detalhada de um modelo, incluindo resumos simples e técnicos, usos recomendados, limitações, notas de governança e artefatos válidos administrados pela aplicação. A resposta não expõe caminhos absolutos nem permite escolher arquivos fora da raiz configurada.
+
 ### `GET /api/models/{model}/artifacts`
 
 Lista artefatos tecnicamente válidos de `ctgan`, `simple_gan` ou `programmatic`. A resposta usa `artifact_id`; não expõe `artifact_path`.
+
+### `GET /api/models/{model}/recommended`
+
+Retorna o artefato recomendado segundo a política do `ModelRegistry`. Para `ctgan`, a prioridade é: artefato `approved` com `recommended_for_neural_generation = true`, outro aprovado, `recommended_candidate`, `candidate` e, somente por seleção manual, artefatos `experimental`, `smoke` ou legados. O endpoint não confunde recência com recomendação.
+
+### Governança
+
+```text
+GET /api/governance
+GET /api/governance/summary
+GET /api/governance/quality
+GET /api/governance/privacy
+GET /api/governance/income
+GET /api/governance/executions
+GET /api/governance/audit
+```
+
+Esses endpoints entregam o mesmo conjunto de evidências usado pela interface React em `Governança`: resumo operacional, qualidade dos dados, privacidade, diversidade e memorização, realismo condicional, execuções recentes e auditoria sanitizada.
+
+Campos ausentes permanecem como `null` na API para que o frontend exiba `Não avaliado` sem transformar ausência em zero. As respostas de governança são sanitizadas: não expõem hostname, usuário local, caminhos absolutos, IP, user agent, variáveis de ambiente, caminhos CUDA, stack traces ou linhas individuais geradas.
 
 ### `POST /api/generations`
 

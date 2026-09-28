@@ -6,10 +6,13 @@ import type {
   GenerationManifestResponse,
   GenerationPreviewResponse,
   GenerationStatusResponse,
+  GovernanceSnapshot,
   HealthResponse,
   ModelArtifactsResponse,
+  ModelEntry,
   ModelName,
-  ModelsResponse
+  ModelsResponse,
+  RecommendedArtifactResponse
 } from "../types/api";
 
 export function getHealth(): Promise<HealthResponse> {
@@ -24,8 +27,44 @@ export function getModels(): Promise<ModelsResponse> {
   return apiGet<ModelsResponse>("/api/models");
 }
 
+export function getModel(model: ModelName): Promise<ModelEntry> {
+  return apiGet<ModelEntry>(`/api/models/${model}`);
+}
+
 export function getModelArtifacts(model: ModelName): Promise<ModelArtifactsResponse> {
   return apiGet<ModelArtifactsResponse>(`/api/models/${model}/artifacts`);
+}
+
+export function getRecommendedModelArtifact(model: ModelName): Promise<RecommendedArtifactResponse> {
+  return apiGet<RecommendedArtifactResponse>(`/api/models/${model}/recommended`);
+}
+
+export function getGovernance(): Promise<GovernanceSnapshot> {
+  return apiGet<GovernanceSnapshot>("/api/governance");
+}
+
+export function getGovernanceSummary(): Promise<GovernanceSnapshot["operational"]> {
+  return apiGet<GovernanceSnapshot["operational"]>("/api/governance/summary");
+}
+
+export function getGovernanceQuality(): Promise<GovernanceSnapshot["quality"]> {
+  return apiGet<GovernanceSnapshot["quality"]>("/api/governance/quality");
+}
+
+export function getGovernancePrivacy(): Promise<GovernanceSnapshot["privacy"]> {
+  return apiGet<GovernanceSnapshot["privacy"]>("/api/governance/privacy");
+}
+
+export function getGovernanceIncome(): Promise<GovernanceSnapshot["income"]> {
+  return apiGet<GovernanceSnapshot["income"]>("/api/governance/income");
+}
+
+export function getGovernanceExecutions(): Promise<GovernanceSnapshot["executions"]> {
+  return apiGet<GovernanceSnapshot["executions"]>("/api/governance/executions");
+}
+
+export function getGovernanceAudit(): Promise<GovernanceSnapshot["audit"]> {
+  return apiGet<GovernanceSnapshot["audit"]>("/api/governance/audit");
 }
 
 export function createGeneration(payload: GenerationCreatePayload, sessionId: string): Promise<GenerationCreateResponse> {

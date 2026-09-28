@@ -12,19 +12,30 @@ class ModelArtifactResponse(StrictBaseModel):
     model: str
     label: str
     created_at_utc: str | None
+    created_at: str | None
     train_rows: int | None
     seed: int | None
     status: str
     purpose: str
+    approved: bool
+    recommended: bool
     recommended_for_neural_generation: bool
     general_platform_default: bool
     schema_version: int
     categorical_vocabulary_version: int
+    vocabulary_version: int
     income_model_version: int
     geography_model_version: int
     geography_catalog_checksum: str | None
     training_required: bool
     model_size_bytes: int | None
+    epochs: int | None
+    library: str | None
+    quality_status: str | None
+    duplicate_base_row_rate: float | dict[str, float] | None
+    exact_train_match_rate: float | dict[str, float] | None
+    conditional_income_status: str | None
+    compatibility: str
     is_legacy_vocabulary: bool
     is_legacy_income_model: bool
     is_legacy_geography_model: bool
@@ -33,7 +44,9 @@ class ModelArtifactResponse(StrictBaseModel):
 
 
 class ModelEntryResponse(StrictBaseModel):
+    id: str
     name: str
+    title: str
     label: str
     category: str
     status: str
@@ -45,9 +58,14 @@ class ModelEntryResponse(StrictBaseModel):
     row_limit: int
     short_description: str
     detailed_description: str
+    summary: str
+    technical_summary: str
+    simple_summary: str
+    recommended_for: str
     recommended_use_cases: list[str]
     benefits: list[str]
     limitations: list[str]
+    governance_notes: list[str]
     recommended_artifact: ModelArtifactResponse | None
     artifact_count: int
     availability_message: str | None
@@ -63,3 +81,9 @@ class ModelArtifactsResponse(StrictBaseModel):
     model: str
     artifacts: list[ModelArtifactResponse]
     recommended_artifact_id: str | None
+
+
+class RecommendedArtifactResponse(StrictBaseModel):
+    model: str
+    artifact: ModelArtifactResponse | None
+    message: str | None

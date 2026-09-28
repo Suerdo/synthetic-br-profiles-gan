@@ -31,6 +31,7 @@ class ApiTest(unittest.TestCase):
             models_root=root / "models",
             web_sessions_root=root / "web_sessions",
             artifacts_root=root / "artifacts",
+            audit_events_path=root / "audit" / "events.jsonl",
             cors_origins=("http://localhost:5173",),
             row_limits={"programmatic": 100, "ctgan": 50, "simple_gan": 20},
         )
@@ -118,9 +119,93 @@ class ApiTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(len(payload["artifacts"]), 1)
         artifact = payload["artifacts"][0]
-        self.assertEqual(artifact["artifact_id"], str(artifact_dir.relative_to(self.settings.models_root)))
+        self.assertEqual(artifact["artifact_id"], artifact_dir.relative_to(self.settings.models_root).as_posix())
         self.assertNotIn("artifact_path", artifact)
+        self.assertNotIn("\\", artifact["artifact_id"])
+        self.assertNotIn("\\", payload["recommended_artifact_id"])
         self.assertTrue(payload["recommended_artifact_id"])
+
+    def test_models_contract_exposes_three_models_and_recommended_ctgan(self) -> None:
+        _write_fake_ctgan_artifact(self.settings.models_root / "ctgan" / "approved")
+
+        response = self.client.get("/api/models")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        by_name = {entry["name"]: entry for entry in payload["models"]}
+        self.assertEqual(set(by_name), {"programmatic", "ctgan", "simple_gan"})
+        self.assertEqual(payload["default_model"], "programmatic")
+        self.assertTrue(by_name["programmatic"]["available"])
+        self.assertTrue(by_name["programmatic"]["recommended"])
+        self.assertEqual(by_name["ctgan"]["recommended_artifact"]["status"], "Aprovado")
+        self.assertTrue(by_name["ctgan"]["recommended_artifact"]["recommended"])
+        self.assertTrue(by_name["simple_gan"]["experimental"])
+
+    def test_model_detail_and_recommended_artifact_endpoints(self) -> None:
+        _write_fake_ctgan_artifact(self.settings.models_root / "ctgan" / "approved")
+
+        detail = self.client.get("/api/models/ctgan")
+        recommended = self.client.get("/api/models/ctgan/recommended")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(recommended.status_code, 200)
+        self.assertEqual(detail.json()["name"], "ctgan")
+        artifact = recommended.json()["artifact"]
+        self.assertIsNotNone(artifact)
+        self.assertEqual(artifact["vocabulary_version"], 2)
+        self.assertEqual(artifact["income_model_version"], 3)
+        self.assertEqual(artifact["geography_model_version"], 2)
+        self.assertIsNone(artifact["epochs"])
+        self.assertIsNone(artifact["conditional_income_status"])
+
+    def test_governance_endpoints_are_sanitized_and_preserve_nulls(self) -> None:
+        _write_fake_ctgan_artifact(self.settings.models_root / "ctgan" / "approved", include_evidence=True)
+        self.settings.audit_events_path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings.audit_events_path.write_text(
+            json.dumps(
+                {
+                    "event": "generation_completed",
+                    "session_id": "abc",
+                    "timestamp_utc": "2026-07-30T00:00:00Z",
+                    "details": {"path": "C:/secret/file.csv", "cpf": "123"},
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        for path in [
+            "/api/governance",
+            "/api/governance/summary",
+            "/api/governance/quality",
+            "/api/governance/privacy",
+            "/api/governance/income",
+            "/api/governance/executions",
+            "/api/governance/audit",
+        ]:
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            dumped = json.dumps(response.json(), ensure_ascii=False).lower()
+            self.assertNotIn("artifact_path", dumped)
+            self.assertNotIn("traceback", dumped)
+            self.assertNotIn("c:/secret", dumped)
+            self.assertNotIn("hostname", dumped)
+            self.assertNotIn("username", dumped)
+
+        payload = self.client.get("/api/governance").json()
+        self.assertEqual(payload["recommended_model"]["metrics"]["duplicate_base_row_rate"], 0.0)
+        self.assertIsNone(payload["recommended_model"]["metrics"]["conditional_income_status"])
+        self.assertTrue(any(item["term"] == "Geo_Key" for item in payload["glossary"]))
+
+    def test_governance_reports_missing_artifact_without_breaking(self) -> None:
+        response = self.client.get("/api/governance")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsNone(payload["recommended_model"])
+        values = [item["value"] for item in payload["operational"]["metrics"]]
+        self.assertIn(None, values)
 
     def _wait_for_completion(self, generation_id: str) -> dict[str, object]:
         for _ in range(30):
@@ -165,7 +250,7 @@ def _fake_run_generation(request) -> GenerationResult:
     )
 
 
-def _write_fake_ctgan_artifact(path: Path) -> Path:
+def _write_fake_ctgan_artifact(path: Path, *, include_evidence: bool = False) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": 1,
@@ -185,7 +270,47 @@ def _write_fake_ctgan_artifact(path: Path) -> Path:
         "income_model_version": 3,
         "geography_model_version": 2,
         "geography_catalog_checksum": "checksum",
+        "environment": {
+            "python_version": "3.13.0",
+            "hostname": "private-host",
+            "username": "private-user",
+            "cpu_count": 64,
+            "memory_gb": 128,
+            "library_versions": {"ctgan": "0.12.1"},
+        },
     }
+    if include_evidence:
+        manifest.update(
+            {
+                "confirmation_benchmark": "ctgan-confirmation",
+                "confirmation_seeds": [47, 48, 49],
+                "approval_evidence_summary": {
+                    "approved_runs": 3,
+                    "by_seed": {
+                        "47": {
+                            "raw_geographic_validity_rate": 1.0,
+                            "raw_global_validity_rate": 0.92,
+                            "known_geography_key_rate": 1.0,
+                            "state_coverage": 1.0,
+                            "municipality_coverage": 1.0,
+                            "ddd_coverage": 1.0,
+                            "geography_key_coverage": 1.0,
+                            "duplicate_base_row_rate": 0.0,
+                            "exact_train_match_rate": 0.0,
+                            "duplicated_identifiers": 0,
+                            "invalid_rows": 0,
+                        }
+                    },
+                },
+                "aggregate_metrics": {
+                    "approved_confirmation_seeds": 3,
+                    "duplicate_base_row_rate_max": 0.0,
+                    "exact_train_match_rate_max": 0.0,
+                    "known_geography_key_rate_min": 1.0,
+                    "geography_key_coverage_min": 1.0,
+                },
+            }
+        )
     (path / "training_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
     for name in ["model.pkl", "metadata.json", "metadata_ctgan.json"]:
         (path / name).write_text("{}", encoding="utf-8")

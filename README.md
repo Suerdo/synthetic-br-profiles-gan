@@ -422,7 +422,7 @@ Ao selecionar `ctgan`, o `ModelRegistry` prioriza explicitamente o artefato `app
 
 ## Interface React e API
 
-O projeto também possui uma primeira versão do frontend React + TypeScript + Vite, servida separadamente da API FastAPI opcional. A interface Streamlit permanece disponível; esta fase apenas adiciona uma alternativa web desacoplada.
+O projeto também possui uma interface React + TypeScript + Vite, servida separadamente da API FastAPI opcional. A interface Streamlit permanece disponível; esta fase adiciona uma alternativa web desacoplada sem duplicar regras de geração, validação ou governança.
 
 Instalar a API:
 
@@ -444,7 +444,9 @@ npm install
 npm run dev
 ```
 
-A API expõe apenas metadados, artefatos administrados e geração assíncrona. O contrato HTTP usa `artifact_id` para modelos neurais e não aceita `model_path` nem `output_path` enviados pelo cliente. Cada geração exige `X-UI-Session-ID`, criado de forma efêmera pelo React e não persistido em storage ou cookie.
+A API expõe apenas metadados, artefatos administrados, governança sanitizada e geração assíncrona. O contrato HTTP usa `artifact_id` para modelos neurais e não aceita `model_path` nem `output_path` enviados pelo cliente. Cada geração exige `X-UI-Session-ID`, criado de forma efêmera pelo React e não persistido em storage ou cookie.
+
+As páginas React disponíveis são `Gerar dados`, `Modelos` e `Governança`. A página `Modelos` consome `/api/models`, `/api/models/{model}` e `/api/models/{model}/recommended`. A página `Governança` consome `/api/governance` e os endpoints seccionados para resumo, qualidade, privacidade, renda, execuções e auditoria. Valores ausentes são exibidos como `Não avaliado`, e as respostas não expõem caminhos absolutos, stack traces ou detalhes sensíveis do ambiente local.
 
 Consulte `docs/api.md` e `docs/react-frontend.md`.
 

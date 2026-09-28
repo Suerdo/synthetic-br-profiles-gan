@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from synthetic_br_profiles_gan.api.errors import register_exception_handlers
 from synthetic_br_profiles_gan.api.jobs import GenerationJobManager
-from synthetic_br_profiles_gan.api.routers import columns, generations, health, models
+from synthetic_br_profiles_gan.api.routers import columns, generations, governance, health, models
 from synthetic_br_profiles_gan.api.settings import ApiSettings, load_api_settings
 
 
@@ -33,6 +33,7 @@ def create_app(settings: ApiSettings | None = None, job_manager: GenerationJobMa
     app.include_router(health.router, prefix="/api")
     app.include_router(columns.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
+    app.include_router(governance.router, prefix="/api")
     app.include_router(generations.router, prefix="/api")
     register_exception_handlers(app)
     return app

@@ -1,0 +1,665 @@
+"""Serviço compartilhado de governança para Streamlit, FastAPI e React."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from synthetic_br_profiles_gan.domain.occupations import OCCUPATION_CATALOG
+from synthetic_br_profiles_gan.localization import CATEGORICAL_VOCABULARY_VERSION, DATA_LOCALE, INCOME_MODEL_VERSION, UNICODE_NORMALIZATION
+from synthetic_br_profiles_gan.models.registry import SavedModelArtifact, get_recommended_artifact, list_saved_model_artifacts
+from synthetic_br_profiles_gan.services.audit_service import read_audit_events
+from synthetic_br_profiles_gan.services.execution_history import (
+    HistoryRecord,
+    history_as_rows,
+    history_summary,
+    load_history,
+    public_history_row,
+)
+
+
+NOT_EVALUATED = "Não avaliado"
+
+
+@dataclass(frozen=True)
+class GovernanceSourceConfig:
+    """Configuração mínima para construir evidências de governança."""
+
+    artifacts_root: Path
+    models_root: Path
+    audit_events_path: Path
+    default_model: str = "programmatic"
+    approved_model_artifacts: dict[str, tuple[str, ...]] | None = None
+
+
+@dataclass(frozen=True)
+class GovernanceSnapshot:
+    """Conjunto de indicadores exibidos nas interfaces de governança."""
+
+    overview: dict[str, Any]
+    quality_indicators: list[dict[str, Any]]
+    privacy_indicators: list[dict[str, Any]]
+    diversity_memorization_indicators: list[dict[str, Any]]
+    conditional_realism_indicators: list[dict[str, Any]]
+    risk_indicators: list[dict[str, Any]]
+    pipeline_status: dict[str, Any]
+    model_versions: list[dict[str, Any]]
+    recommended_neural_model: list[dict[str, Any]]
+    history: list[HistoryRecord]
+    audit_events: list[dict[str, Any]]
+
+
+def build_governance_snapshot(config: Any) -> GovernanceSnapshot:
+    """Monta indicadores de governança apenas com evidências locais disponíveis."""
+    resolved = _resolve_config(config)
+    history = load_history(resolved.artifacts_root)
+    summary = history_summary(history)
+    artifacts = list_saved_model_artifacts(resolved.models_root)
+    recommended_ctgan = get_recommended_artifact(resolved.models_root, "ctgan")
+    approved_generation_artifacts = [
+        artifact for artifact in artifacts if artifact.model in {"ctgan", "simple_gan"} and is_approved_vocabulary_v2_artifact(artifact, resolved)
+    ]
+    latest_approved = _latest_artifact(approved_generation_artifacts)
+    overview = {
+        "default_model": default_generation_model(resolved, artifacts),
+        "available_models": _available_model_labels(approved_generation_artifacts),
+        "vocabulary_version": CATEGORICAL_VOCABULARY_VERSION,
+        "income_model_version": INCOME_MODEL_VERSION,
+        "data_locale": DATA_LOCALE,
+        "unicode_normalization": UNICODE_NORMALIZATION,
+        "total_runs": summary["total_records"],
+        "latest_run": summary["latest_identifier"] or "Sem execução registrada",
+        "latest_status": summary["latest_status"],
+        "occupation_count": len(OCCUPATION_CATALOG),
+        "pipeline_status": "Operacional" if summary["total_records"] > 0 else "Sem execução registrada",
+        "latest_approved_model_version": None if latest_approved is None else latest_approved.artifact_id,
+    }
+    return GovernanceSnapshot(
+        overview=overview,
+        quality_indicators=_quality_indicators(history),
+        privacy_indicators=_privacy_indicators(history),
+        diversity_memorization_indicators=_diversity_memorization_indicators(history),
+        conditional_realism_indicators=_conditional_realism_indicators(history),
+        risk_indicators=_risk_indicators(history),
+        pipeline_status=_pipeline_status(summary),
+        model_versions=model_version_rows(artifacts, resolved),
+        recommended_neural_model=_recommended_neural_model_rows(recommended_ctgan),
+        history=history,
+        audit_events=read_audit_events(resolved.audit_events_path, limit=200),
+    )
+
+
+def build_governance_api_snapshot(config: Any) -> dict[str, Any]:
+    """Retorna um snapshot tipado e sanitizado para a API React."""
+    snapshot = build_governance_snapshot(config)
+    recommended = recommended_neural_model_public(_resolve_config(config).models_root)
+    executions = [public_history_row(record) for record in snapshot.history[:100]]
+    return {
+        "operational": {
+            "metrics": [
+                _metric("Modelos disponíveis", "available_models", snapshot.overview["available_models"], "Catálogo e registry", "Modelos com geração direta ou artefatos válidos."),
+                _metric("Modelo padrão geral", "default_model", snapshot.overview["default_model"], "configs/ui.yaml", "Modelo inicial da interface; não significa melhor desempenho universal."),
+                _metric("Modelo neural recomendado", "recommended_neural_model", None if recommended is None else recommended["artifact_id"], "ModelRegistry", "Artefato neural aprovado internamente, quando disponível."),
+                _metric("Execuções avaliadas", "total_runs", snapshot.overview["total_runs"], "manifestos em artifacts/", "Quantidade de registros operacionais identificados localmente."),
+                _metric("Status das evidências", "pipeline_status", snapshot.overview["pipeline_status"], "manifestos em artifacts/", "Indica se há evidências locais para análise."),
+            ],
+            "summary": snapshot.overview,
+        },
+        "recommended_model": recommended,
+        "quality": {
+            "indicators": snapshot.quality_indicators,
+            "status": _section_status(snapshot.quality_indicators),
+        },
+        "privacy": {
+            "indicators": snapshot.privacy_indicators,
+            "diversity_memorization": snapshot.diversity_memorization_indicators,
+            "status": _section_status(snapshot.diversity_memorization_indicators),
+        },
+        "income": {
+            "indicators": snapshot.conditional_realism_indicators,
+            "status": _section_status(snapshot.conditional_realism_indicators),
+        },
+        "executions": executions,
+        "audit": snapshot.audit_events,
+        "glossary": governance_glossary(),
+    }
+
+
+def recommended_neural_model_public(models_root: str | Path) -> dict[str, Any] | None:
+    artifact = get_recommended_artifact(models_root, "ctgan")
+    if artifact is None:
+        return None
+    return artifact_public_summary(artifact)
+
+
+def artifact_public_summary(artifact: SavedModelArtifact) -> dict[str, Any]:
+    """Retorna resumo público e sanitizado de um artefato de modelo."""
+    metrics = artifact_quality_summary(artifact)
+    return {
+        "artifact_id": artifact.artifact_id,
+        "model": artifact.model,
+        "status": artifact.approval_status,
+        "purpose": artifact.purpose,
+        "created_at_utc": artifact.created_at_utc,
+        "vocabulary_version": artifact.categorical_vocabulary_version,
+        "income_model_version": artifact.income_model_version,
+        "geography_model_version": artifact.geography_model_version,
+        "geography_catalog_checksum": artifact.geography_catalog_checksum,
+        "benchmark": artifact.manifest.get("confirmation_benchmark"),
+        "seeds": artifact.manifest.get("confirmation_seeds") if isinstance(artifact.manifest.get("confirmation_seeds"), list) else None,
+        "result": _confirmation_result(artifact),
+        "metrics": metrics,
+        "limitations": _artifact_limitations(artifact),
+        "environment": _sanitized_environment(artifact.manifest),
+        "approval_note": (
+            "A aprovação representa uma decisão técnica interna baseada nos critérios do projeto. "
+            "Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial."
+        ),
+    }
+
+
+def artifact_quality_summary(artifact: SavedModelArtifact) -> dict[str, Any]:
+    """Extrai métricas públicas agregadas de um artefato, preservando `None` para ausências."""
+    manifest = artifact.manifest if isinstance(artifact.manifest, dict) else {}
+    approval = manifest.get("approval_evidence_summary") if isinstance(manifest.get("approval_evidence_summary"), dict) else {}
+    aggregate = manifest.get("aggregate_metrics") if isinstance(manifest.get("aggregate_metrics"), dict) else {}
+    metrics_by_seed = manifest.get("metrics_by_seed") if isinstance(manifest.get("metrics_by_seed"), list) else []
+    raw_global_values = _seed_values(approval, "raw_global_validity_rate") or _row_values(metrics_by_seed, "raw_global_validity_rate")
+    raw_geo_values = _seed_values(approval, "raw_geographic_validity_rate") or _row_values(metrics_by_seed, "raw_geographic_validity_rate")
+    duplicate_base_rates = _seed_values(approval, "duplicate_base_row_rate") or _row_values(metrics_by_seed, "duplicate_base_row_rate")
+    exact_train_rates = _seed_values(approval, "exact_train_match_rate") or _row_values(metrics_by_seed, "exact_train_match_rate")
+    duplicated_identifiers = _seed_values(approval, "duplicated_identifiers")
+    invalid_rows = _seed_values(approval, "invalid_rows") or _row_values(metrics_by_seed, "invalid_rows")
+    return {
+        "confirmation_seeds": manifest.get("confirmation_seeds") if isinstance(manifest.get("confirmation_seeds"), list) else None,
+        "approved_confirmation_seeds": aggregate.get("approved_confirmation_seeds") or approval.get("approved_runs"),
+        "raw_geographic_validity_rate": _range_or_single(raw_geo_values),
+        "raw_global_validity_rate": _range_or_single(raw_global_values),
+        "known_geography_key_rate": aggregate.get("known_geography_key_rate_min") or _min_or_none(_seed_values(approval, "known_geography_key_rate")),
+        "state_coverage": _min_or_none(_seed_values(approval, "state_coverage")),
+        "municipality_coverage": _min_or_none(_seed_values(approval, "municipality_coverage")),
+        "ddd_coverage": _min_or_none(_seed_values(approval, "ddd_coverage")),
+        "geography_key_coverage": aggregate.get("geography_key_coverage_min") or _min_or_none(_seed_values(approval, "geography_key_coverage")),
+        "duplicate_base_row_rate": aggregate.get("duplicate_base_row_rate_max") if aggregate.get("duplicate_base_row_rate_max") is not None else _max_or_none(duplicate_base_rates),
+        "duplicate_base_duplicated_occurrences": _max_or_none(_seed_values(approval, "duplicate_base_duplicated_occurrences")),
+        "duplicated_identifiers": _max_or_none(duplicated_identifiers),
+        "invalid_rows": _max_or_none(invalid_rows),
+        "exact_train_match_rate": aggregate.get("exact_train_match_rate_max") if aggregate.get("exact_train_match_rate_max") is not None else _max_or_none(exact_train_rates),
+        "exact_train_match_count": _max_or_none(_seed_values(approval, "exact_train_match_count")),
+        "conditional_income_status": _conditional_income_status(manifest),
+        "quality_status": aggregate.get("status") or artifact.approval_status or artifact.purpose,
+        "training_seconds": _range_or_single(_row_values(metrics_by_seed, "training_seconds")),
+        "generation_seconds": _range_or_single(_row_values(metrics_by_seed, "generation_seconds")),
+        "peak_memory_mb": _range_or_single(_row_values(metrics_by_seed, "peak_memory_mb")),
+        "model_size_mb": _range_or_single(_row_values(metrics_by_seed, "model_size_mb")),
+        "library": _library_label(manifest),
+        "epochs": _epochs(manifest),
+    }
+
+
+def is_approved_vocabulary_v2_artifact(artifact: SavedModelArtifact, config: Any) -> bool:
+    """Indica se um artefato neural pode ser usado diretamente na geração pela interface."""
+    resolved = _resolve_config(config)
+    if artifact.model not in {"ctgan", "simple_gan"}:
+        return False
+    configured = artifact.artifact_id in set((resolved.approved_model_artifacts or {}).get(artifact.model, ()))
+    approved = artifact.approval_status == "approved" or artifact.purpose == "approved" or configured
+    return (
+        approved
+        and artifact.categorical_vocabulary_version >= CATEGORICAL_VOCABULARY_VERSION
+        and artifact.data_locale == DATA_LOCALE
+        and artifact.unicode_normalization == UNICODE_NORMALIZATION
+    )
+
+
+def default_generation_model(config: Any, artifacts: list[SavedModelArtifact] | None = None) -> str:
+    """Escolhe o modelo padrão operacional da interface."""
+    resolved = _resolve_config(config)
+    if resolved.default_model == "programmatic":
+        return "programmatic"
+    materialized = artifacts if artifacts is not None else list_saved_model_artifacts(resolved.models_root)
+    if resolved.default_model == "ctgan" and any(
+        artifact.model == "ctgan" and is_approved_vocabulary_v2_artifact(artifact, resolved)
+        for artifact in materialized
+    ):
+        return "ctgan"
+    return "programmatic"
+
+
+def model_version_rows(artifacts: list[SavedModelArtifact], config: Any) -> list[dict[str, Any]]:
+    """Converte artefatos em linhas de histórico de modelos."""
+    resolved = _resolve_config(config)
+    rows: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        generation_ready = is_approved_vocabulary_v2_artifact(artifact, resolved)
+        rows.append(
+            {
+                "modelo": artifact.model,
+                "artefato": artifact.artifact_id,
+                "criado_em_utc": artifact.created_at_utc or NOT_EVALUATED,
+                "treino": artifact.train_rows if artifact.train_rows is not None else NOT_EVALUATED,
+                "seed": artifact.seed if artifact.seed is not None else NOT_EVALUATED,
+                "schema": artifact.schema_version,
+                "modelo_de_renda": artifact.income_model_version,
+                "vocabulário": artifact.categorical_vocabulary_version,
+                "localidade": artifact.data_locale or NOT_EVALUATED,
+                "normalização": artifact.unicode_normalization or NOT_EVALUATED,
+                "propósito": artifact.purpose,
+                "status": artifact.approval_status,
+                "legado": "sim" if artifact.is_legacy_vocabulary else "não",
+                "renda_legada": "sim" if artifact.is_legacy_income_model else "não",
+                "disponível_para_geração": "sim" if generation_ready else "não",
+            }
+        )
+    return rows
+
+
+def governance_glossary() -> list[dict[str, str]]:
+    """Retorna glossário operacional reutilizável pela API e frontend."""
+    return [
+        _glossary("Duplicidade de combinações-base", "Repetição exata das 11 colunas-base produzidas pelo modelo. Identificadores derivados não participam."),
+        _glossary("Correspondência exata com treino", "Percentual de registros sintéticos cujas 11 colunas-base coincidem com pelo menos um registro de treinamento."),
+        _glossary("Correspondência exata com holdout", "Métrica de controle com dados não usados no treino, útil para distinguir memorização de coincidências da distribuição."),
+        _glossary("Realismo condicional", "Capacidade de preservar distribuições em contextos específicos, como renda por ocupação, escolaridade e idade."),
+        _glossary("Cauda superior", "Região dos valores mais altos da distribuição, avaliada por percentis como p95 e p99."),
+        _glossary("TVD", "Distância de variação total entre distribuições categóricas. Quanto menor, mais próximas estão as distribuições."),
+        _glossary("DCR", "Distance to Closest Record: distância do registro sintético ao registro de referência mais próximo."),
+        _glossary("NNDR", "Nearest Neighbor Distance Ratio: razão entre distâncias ao primeiro e ao segundo vizinho mais próximo."),
+        _glossary("Validade estrutural", "Conjunto de regras de domínio, nulidade, consistência e relacionamento aplicadas ao schema final."),
+        _glossary("Geo_Key", "Chave categórica interna que representa combinações permitidas de região, estado, município e DDD para CTGAN geography v2."),
+    ]
+
+
+def _recommended_neural_model_rows(artifact: SavedModelArtifact | None) -> list[dict[str, Any]]:
+    if artifact is None:
+        return [_recommended_row("Modelo neural recomendado", NOT_EVALUATED, "training_manifest.json", "Nenhum artefato neural aprovado e recomendado foi encontrado.")]
+    public = artifact_public_summary(artifact)
+    metrics = public["metrics"]
+    return [
+        _recommended_row("Identificador", public["artifact_id"], "training_manifest.json", "Diretório administrado do artefato aprovado."),
+        _recommended_row("Status", public["status"], "training_manifest.json", "Status técnico interno do artefato."),
+        _recommended_row("Vocabulário", f"v{public['vocabulary_version']}", "training_manifest.json", "Versão do vocabulário categórico."),
+        _recommended_row("Renda", f"v{public['income_model_version']}", "training_manifest.json", "Versão da calibração sintética de renda."),
+        _recommended_row("Geografia", f"v{public['geography_model_version']}", "training_manifest.json", "Versão da representação geográfica neural."),
+        _recommended_row("Checksum geográfico", public.get("geography_catalog_checksum") or NOT_EVALUATED, "training_manifest.json", "Checksum do catálogo determinístico de Geo_Key."),
+        _recommended_row("Benchmark de confirmação", public.get("benchmark") or NOT_EVALUATED, "approval_manifest.json", "Benchmark usado como evidência de aprovação."),
+        _recommended_row("Seeds", ", ".join(str(seed) for seed in public.get("seeds") or []) or NOT_EVALUATED, "approval_manifest.json", "Seeds independentes da confirmação."),
+        _recommended_row("Resultado", public.get("result") or NOT_EVALUATED, "run_summary.csv", "Resultado agregado da confirmação."),
+        _recommended_row("Validade geográfica raw", _display_value(metrics.get("raw_geographic_validity_rate")), "run_summary.csv", "Validade geográfica bruta após decodificação de Geo_Key."),
+        _recommended_row("Validade global raw", _display_value(metrics.get("raw_global_validity_rate")), "run_summary.csv", "Intervalo da validade estrutural bruta."),
+        _recommended_row("Duplicidade-base", _display_value(metrics.get("duplicate_base_row_rate")), "evaluation.json → privacy", "Taxa de duplicidade das colunas-base."),
+        _recommended_row("Match treino", _display_value(metrics.get("exact_train_match_rate")), "evaluation.json → privacy", "Correspondência exata com treino nas colunas-base."),
+        _recommended_row("Cobertura", _coverage_label(metrics), "results.csv", "Cobertura geográfica e ocupacional disponível."),
+        _recommended_row("Ambiente", public["environment"].get("summary") or NOT_EVALUATED, "training_manifest.json", "Ambiente sanitizado registrado no artefato aprovado."),
+        _recommended_row("Limitações", "; ".join(public.get("limitations") or []) or NOT_EVALUATED, "approval_manifest.json", "Limitações conhecidas preservadas na aprovação."),
+        _recommended_row("Nota", public["approval_note"], "approval_manifest.json", "Interpretação institucional da aprovação."),
+    ]
+
+
+def _recommended_row(campo: str, valor: Any, fonte: str, interpretacao: str) -> dict[str, Any]:
+    return {"campo": campo, "valor": valor, "fonte": fonte, "interpretação": interpretacao}
+
+
+def _quality_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
+    latest_pipeline = next((record for record in history if record.kind in {"pipeline_run", "ui_generation"}), None)
+    if latest_pipeline is None:
+        return [_empty_indicator("Qualidade estrutural", "validation.is_valid")]
+    validation = latest_pipeline.manifest.get("validation") or {}
+    if not isinstance(validation, dict):
+        return [_empty_indicator("Qualidade estrutural", "validation.is_valid")]
+    is_valid = validation.get("is_valid")
+    reason_counts = validation.get("reason_counts") or {}
+    return [
+        _indicator(
+            "Validação estrutural",
+            "validation.is_valid",
+            bool(is_valid) if is_valid is not None else None,
+            latest_pipeline.identifier,
+            "O schema completo foi validado antes da exportação.",
+            "validation.json ou manifesto da geração",
+            risk="Baixo" if is_valid else "Elevado",
+            limit=True,
+            gate_type="mandatory",
+            date=latest_pipeline.created_at_utc,
+        ),
+        _indicator(
+            "Erros estruturais",
+            "validation.reason_counts",
+            sum(int(value) for value in reason_counts.values()) if isinstance(reason_counts, dict) else None,
+            latest_pipeline.identifier,
+            "Contagem agregada de violações estruturais do relatório mais recente.",
+            "validation.json ou manifesto da geração",
+            risk="Baixo" if not reason_counts else "Moderado",
+            limit=0,
+            gate_type="mandatory",
+            date=latest_pipeline.created_at_utc,
+        ),
+    ]
+
+
+def _privacy_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
+    latest = _latest_record_with_evaluation(history)
+    if latest is None:
+        return [_empty_indicator("Duplicidade de linhas", "duplicate_row_rate"), _empty_indicator("Correspondência exata com treino", "exact_train_match_rate")]
+    record, evaluation = latest
+    privacy = evaluation.get("privacy", {}) if isinstance(evaluation.get("privacy"), dict) else {}
+    return [
+        _indicator("Duplicidade de linhas", "privacy.duplicate_row_rate", privacy.get("duplicate_row_rate"), record.identifier, "Indicador de diversidade nas colunas-base.", "evaluation.json → privacy", risk="Diagnóstico", limit="quality gates", date=record.created_at_utc),
+        _indicator("Correspondência exata com treino", "privacy.exact_train_match_rate", privacy.get("exact_train_match_rate"), record.identifier, "Indicador de possível memorização ou coincidência estatística.", "evaluation.json → privacy", risk="Diagnóstico", limit="quality gates", gate_type="mandatory", date=record.created_at_utc),
+    ]
+
+
+def _diversity_memorization_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
+    latest = _latest_record_with_evaluation(history)
+    if latest is None:
+        return [
+            _empty_indicator("Combinações-base únicas", "privacy.unique_combinations"),
+            _empty_indicator("Duplicidade de combinações-base", "privacy.duplicate_base_rows.duplicate_row_rate"),
+            _empty_indicator("Correspondência exata com treino", "privacy.exact_matches.train.exact_match_rate"),
+            _empty_indicator("Correspondência exata com holdout", "privacy.exact_matches.holdout.exact_match_rate"),
+        ]
+    record, evaluation = latest
+    privacy = evaluation.get("privacy", {}) if isinstance(evaluation.get("privacy"), dict) else {}
+    duplicate_base = privacy.get("duplicate_base_rows") if isinstance(privacy.get("duplicate_base_rows"), dict) else {}
+    exact_matches = privacy.get("exact_matches") if isinstance(privacy.get("exact_matches"), dict) else {}
+    train = exact_matches.get("train") if isinstance(exact_matches.get("train"), dict) else {}
+    holdout = exact_matches.get("holdout") if isinstance(exact_matches.get("holdout"), dict) else {}
+    nearest = privacy.get("nearest_neighbor_train") if isinstance(privacy.get("nearest_neighbor_train"), dict) else {}
+    dcr = nearest.get("distance_to_closest_record") if isinstance(nearest.get("distance_to_closest_record"), dict) else {}
+    nndr = nearest.get("nearest_neighbor_distance_ratio") if isinstance(nearest.get("nearest_neighbor_distance_ratio"), dict) else {}
+    return [
+        _indicator("Combinações-base únicas", "privacy.unique_combinations", privacy.get("unique_combinations"), record.identifier, "Quantidade de combinações distintas nas 11 colunas-base.", "evaluation.json → privacy → unique_combinations", date=record.created_at_utc),
+        _indicator("Taxa de combinações-base únicas", "privacy.unique_combination_rate", privacy.get("unique_combination_rate"), record.identifier, "Proporção de linhas sintéticas com combinação-base distinta.", "evaluation.json → privacy → unique_combination_rate", unit="taxa", date=record.created_at_utc),
+        _indicator("Ocorrências duplicadas", "privacy.duplicate_base_rows.duplicated_occurrences", duplicate_base.get("duplicated_occurrences"), record.identifier, "Ocorrências posteriores à primeira em grupos duplicados.", "evaluation.json → privacy → duplicate_base_rows", date=record.created_at_utc),
+        _indicator("Grupos duplicados", "privacy.duplicate_base_rows.duplicated_groups", duplicate_base.get("duplicated_groups"), record.identifier, "Combinações-base distintas que aparecem mais de uma vez.", "evaluation.json → privacy → duplicate_base_rows", date=record.created_at_utc),
+        _indicator("Taxa de duplicidade", "privacy.duplicate_base_rows.duplicate_row_rate", duplicate_base.get("duplicate_row_rate"), record.identifier, "Duplicidade de combinações-base; identificadores derivados não participam.", "evaluation.json → privacy → duplicate_base_rows", unit="taxa", date=record.created_at_utc),
+        _indicator("Correspondências exatas com treino", "privacy.exact_matches.train.exact_match_count", train.get("exact_match_count"), record.identifier, "Quantidade de perfis sintéticos cujas 11 colunas-base coincidem com o treino.", "evaluation.json → privacy → exact_matches → train", date=record.created_at_utc),
+        _indicator("Taxa de correspondência exata com treino", "privacy.exact_matches.train.exact_match_rate", train.get("exact_match_rate"), record.identifier, "Indicador de possível memorização ou coincidência estatística.", "evaluation.json → privacy → exact_matches → train", unit="taxa", gate_type="mandatory", date=record.created_at_utc),
+        _indicator("Correspondências exatas com holdout", "privacy.exact_matches.holdout.exact_match_count", holdout.get("exact_match_count"), record.identifier, "Métrica de controle contra dados não usados no treino.", "evaluation.json → privacy → exact_matches → holdout", date=record.created_at_utc),
+        _indicator("Taxa de correspondência exata com holdout", "privacy.exact_matches.holdout.exact_match_rate", holdout.get("exact_match_rate"), record.identifier, "Ajuda a distinguir memorização de coincidências da distribuição.", "evaluation.json → privacy → exact_matches → holdout", unit="taxa", date=record.created_at_utc),
+        _indicator("DCR", "privacy.nearest_neighbor_train.distance_to_closest_record.mean", dcr.get("mean"), record.identifier, "Distância média ao registro de treino mais próximo nas colunas-base.", "evaluation.json → privacy → nearest_neighbor_train", date=record.created_at_utc),
+        _indicator("NNDR", "privacy.nearest_neighbor_train.nearest_neighbor_distance_ratio.mean", nndr.get("mean"), record.identifier, "Razão de distâncias entre o vizinho mais próximo e o segundo mais próximo.", "evaluation.json → privacy → nearest_neighbor_train", date=record.created_at_utc),
+    ]
+
+
+def _conditional_realism_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
+    latest = _latest_record_with_evaluation(history)
+    if latest is None:
+        return [
+            _empty_indicator("Versão do modelo de renda", "manifest.income_model_version"),
+            _empty_indicator("Maior desvio condicional", "conditional_income.summary.max_conditional_income_wasserstein"),
+        ]
+    record, evaluation = latest
+    conditional = evaluation.get("conditional_income", {}) if isinstance(evaluation.get("conditional_income"), dict) else {}
+    summary = conditional.get("summary", {}) if isinstance(conditional.get("summary"), dict) else {}
+    manifest = record.manifest if isinstance(record.manifest, dict) else {}
+    return [
+        _indicator("Versão do modelo de renda", "manifest.income_model_version", manifest.get("income_model_version"), record.identifier, "Versão da calibração sintética usada para renda.", "manifest.json → income_model_version", date=record.created_at_utc),
+        _indicator("Grupos avaliados", "conditional_income.summary.conditional_groups_compared", summary.get("conditional_groups_compared"), record.identifier, "Quantidade de grupos condicionais com amostra suficiente.", "evaluation.json → conditional_income → summary", date=record.created_at_utc),
+        _indicator("Maior desvio condicional", "conditional_income.summary.max_conditional_income_wasserstein", summary.get("max_conditional_income_wasserstein"), record.identifier, "Maior distância Wasserstein observada entre renda sintética e referência dentro de grupos.", "evaluation.json → conditional_income → summary", date=record.created_at_utc),
+        _indicator("Maior diferença de p95", "conditional_income.summary.max_abs_p95_difference", summary.get("max_abs_p95_difference"), record.identifier, "Maior diferença absoluta no percentil 95 condicional.", "evaluation.json → conditional_income → summary", date=record.created_at_utc),
+        _indicator("Maior diferença de p99", "conditional_income.summary.max_abs_p99_difference", summary.get("max_abs_p99_difference"), record.identifier, "Maior diferença absoluta no percentil 99 condicional.", "evaluation.json → conditional_income → summary", date=record.created_at_utc),
+        _indicator("Grupos com cauda elevada", "conditional_income.summary.groups_with_excessive_tail", summary.get("groups_with_excessive_tail"), record.identifier, "Grupos em que a cauda superior sintética superou o limiar diagnóstico.", "evaluation.json → conditional_income → summary", date=record.created_at_utc),
+        _indicator("Status da avaliação", "conditional_income.summary.status", summary.get("status"), record.identifier, "Situação diagnóstica da avaliação condicional.", "evaluation.json → conditional_income → summary", date=record.created_at_utc),
+    ]
+
+
+def _risk_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
+    latest = history[0] if history else None
+    if latest is None:
+        return [
+            _indicator(
+                "Risco geral operacional",
+                "manifest.status",
+                "Sem execução registrada",
+                None,
+                "Nenhum manifesto local foi encontrado para classificar risco operacional.",
+                "manifestos em artifacts/",
+                risk=NOT_EVALUATED,
+                date=None,
+            )
+        ]
+    status = latest.status
+    risk = "Baixo" if status in {"approved", "completed"} else "Moderado" if "quarantine" in str(status).lower() or status is None else "Elevado"
+    return [_indicator("Risco geral operacional", "manifest.status", status, latest.identifier, "Leitura conservadora do status mais recente; não é certificação de conformidade.", "manifesto de execução", risk=risk, limit="approved/completed para baixo risco técnico", date=latest.created_at_utc)]
+
+
+def _pipeline_status(summary: dict[str, Any]) -> dict[str, Any]:
+    if summary["total_records"] == 0:
+        return {"status": "Sem execução registrada", "interpretação": "Nenhum manifesto local foi encontrado.", "total": 0}
+    return {"status": "Operacional", "interpretação": "Há manifestos locais disponíveis para rastreabilidade.", "total": summary["total_records"], "status_counts": summary["status_counts"]}
+
+
+def _indicator(
+    label: str,
+    metric: str,
+    value: Any,
+    source_record: str | None,
+    interpretation: str,
+    source: str,
+    *,
+    risk: str = "Diagnóstico",
+    limit: Any = None,
+    unit: str | None = None,
+    gate_type: str = "informational",
+    date: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "indicator": label,
+        "indicador": label,
+        "risk": NOT_EVALUATED if value is None else risk,
+        "risco": NOT_EVALUATED if value is None else risk,
+        "metric": metric,
+        "métrica": metric,
+        "value": value,
+        "valor": value,
+        "unit": unit or ("taxa" if metric.endswith("_rate") else "valor"),
+        "unidade": unit or ("taxa" if metric.endswith("_rate") else "valor"),
+        "limit": limit,
+        "limite": limit,
+        "gate_type": gate_type,
+        "fonte": source,
+        "source": source,
+        "execution": source_record,
+        "execução": source_record,
+        "interpretation": (
+            "Esta execução foi produzida antes da inclusão desta métrica ou não contém os artefatos necessários."
+            if value is None
+            else interpretation
+        ),
+        "interpretação": (
+            "Esta execução foi produzida antes da inclusão desta métrica ou não contém os artefatos necessários."
+            if value is None
+            else interpretation
+        ),
+        "date": date,
+        "data": date,
+    }
+
+
+def _empty_indicator(label: str, metric: str) -> dict[str, Any]:
+    indicator = _indicator(label, metric, None, None, "Não há evidência local suficiente para calcular este indicador.", "Não disponível", risk=NOT_EVALUATED, limit=None, date=None)
+    indicator["valor"] = NOT_EVALUATED
+    return indicator
+
+
+def _latest_record_with_evaluation(history: list[HistoryRecord]) -> tuple[HistoryRecord, dict[str, Any]] | None:
+    for record in history:
+        evaluation = _read_record_evaluation(record)
+        if evaluation:
+            return record, evaluation
+    return None
+
+
+def _read_record_evaluation(record: HistoryRecord) -> dict[str, Any]:
+    manifest = record.manifest if isinstance(record.manifest, dict) else {}
+    embedded = manifest.get("evaluation")
+    if isinstance(embedded, dict) and embedded:
+        return embedded
+    sibling = record.path.parent / "evaluation.json"
+    if not sibling.exists():
+        return {}
+    try:
+        with sibling.open(encoding="utf-8") as file:
+            loaded = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _resolve_config(config: Any) -> GovernanceSourceConfig:
+    if isinstance(config, GovernanceSourceConfig):
+        return config
+    return GovernanceSourceConfig(
+        artifacts_root=Path(getattr(config, "artifacts_root")),
+        models_root=Path(getattr(config, "models_root")),
+        audit_events_path=Path(getattr(config, "audit_events_path", Path("artifacts/ui_audit/events.jsonl"))),
+        default_model=str(getattr(config, "default_model", "programmatic")),
+        approved_model_artifacts=getattr(config, "approved_model_artifacts", None),
+    )
+
+
+def _available_model_labels(approved_generation_artifacts: list[SavedModelArtifact]) -> str:
+    available = {"programmatic"}
+    available.update(artifact.model for artifact in approved_generation_artifacts)
+    labels = {"programmatic": "Programático", "ctgan": "CTGAN", "simple_gan": "GAN simples"}
+    return ", ".join(labels[model] for model in ("programmatic", "ctgan", "simple_gan") if model in available)
+
+
+def _latest_artifact(artifacts: list[SavedModelArtifact]) -> SavedModelArtifact | None:
+    if not artifacts:
+        return None
+    return sorted(artifacts, key=lambda item: item.created_at_utc or "", reverse=True)[0]
+
+
+def _confirmation_result(artifact: SavedModelArtifact) -> str | None:
+    metrics = artifact_quality_summary(artifact)
+    approved = metrics.get("approved_confirmation_seeds")
+    seeds = metrics.get("confirmation_seeds")
+    if isinstance(approved, (int, float)) and isinstance(seeds, list):
+        return f"{int(approved)}/{len(seeds)} seeds aprovadas"
+    return None
+
+
+def _artifact_limitations(artifact: SavedModelArtifact) -> list[str]:
+    value = artifact.manifest.get("limitations")
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
+def _sanitized_environment(manifest: dict[str, Any]) -> dict[str, Any]:
+    environment = manifest.get("environment") if isinstance(manifest.get("environment"), dict) else {}
+    libraries = manifest.get("library_versions") or environment.get("library_versions") or {}
+    python = _python_version_label(environment.get("python_version") or manifest.get("python_version"))
+    ctgan = libraries.get("ctgan") or manifest.get("ctgan_version")
+    tensorflow = libraries.get("tensorflow")
+    torch = libraries.get("torch")
+    pieces = [piece for piece in [python, f"CTGAN {ctgan}" if ctgan else None] if piece]
+    return {
+        "python": python,
+        "ctgan": ctgan,
+        "tensorflow": tensorflow,
+        "torch": torch,
+        "summary": "; ".join(pieces) if pieces else None,
+    }
+
+
+def _python_version_label(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    parts = value.split()[0].split(".")
+    if len(parts) >= 2:
+        return f"Python {parts[0]}.{parts[1]}"
+    return "Python"
+
+
+def _library_label(manifest: dict[str, Any]) -> str | None:
+    env = _sanitized_environment(manifest)
+    if env.get("ctgan"):
+        return f"ctgan {env['ctgan']}"
+    return None
+
+
+def _epochs(manifest: dict[str, Any]) -> int | None:
+    for key in ("ctgan_config", "config"):
+        config = manifest.get(key)
+        if isinstance(config, dict) and config.get("epochs") is not None:
+            try:
+                return int(config["epochs"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _conditional_income_status(manifest: dict[str, Any]) -> str | None:
+    aggregate = manifest.get("aggregate_metrics") if isinstance(manifest.get("aggregate_metrics"), dict) else {}
+    if aggregate.get("renda_wasserstein_normalized_max") is not None:
+        return "avaliado"
+    return None
+
+
+def _seed_values(approval: dict[str, Any], key: str) -> list[float]:
+    by_seed = approval.get("by_seed") if isinstance(approval.get("by_seed"), dict) else {}
+    values: list[float] = []
+    for payload in by_seed.values():
+        if isinstance(payload, dict) and payload.get(key) is not None:
+            try:
+                values.append(float(payload[key]))
+            except (TypeError, ValueError):
+                continue
+    return values
+
+
+def _row_values(rows: list[Any], key: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        if isinstance(row, dict) and row.get(key) is not None:
+            try:
+                values.append(float(row[key]))
+            except (TypeError, ValueError):
+                continue
+    return values
+
+
+def _range_or_single(values: list[float]) -> dict[str, float] | None:
+    if not values:
+        return None
+    return {"min": min(values), "max": max(values)}
+
+
+def _min_or_none(values: list[float]) -> float | None:
+    return min(values) if values else None
+
+
+def _max_or_none(values: list[float]) -> float | None:
+    return max(values) if values else None
+
+
+def _section_status(indicators: list[dict[str, Any]]) -> str:
+    return "Não avaliado" if not indicators or all(item.get("value") is None for item in indicators) else "Disponível"
+
+
+def _metric(label: str, key: str, value: Any, source: str, help_text: str) -> dict[str, Any]:
+    return {"label": label, "key": key, "value": value, "source": source, "help": help_text}
+
+
+def _glossary(term: str, definition: str) -> dict[str, str]:
+    return {"term": term, "definition": definition}
+
+
+def _display_value(value: Any) -> Any:
+    if isinstance(value, dict) and {"min", "max"} <= set(value):
+        return f"{value['min']} a {value['max']}"
+    return value if value is not None else NOT_EVALUATED
+
+
+def _coverage_label(metrics: dict[str, Any]) -> str:
+    geo_parts = []
+    for label, key in [("estados", "state_coverage"), ("municípios", "municipality_coverage"), ("DDDs", "ddd_coverage"), ("Geo_Key", "geography_key_coverage")]:
+        value = metrics.get(key)
+        if value is not None:
+            geo_parts.append(f"{label}: {value}")
+    return "; ".join(geo_parts) if geo_parts else NOT_EVALUATED
