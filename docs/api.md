@@ -76,6 +76,17 @@ Esses endpoints entregam o mesmo conjunto de evidências usado pela interface Re
 
 Campos ausentes permanecem como `null` na API para que o frontend exiba `Não avaliado` sem transformar ausência em zero. As respostas de governança são sanitizadas: não expõem hostname, usuário local, caminhos absolutos, IP, user agent, variáveis de ambiente, caminhos CUDA, stack traces ou linhas individuais geradas.
 
+#### Campos semânticos de governança
+
+`GET /api/governance` também inclui blocos semânticos para a interface React:
+
+- `governance_decision`: decisão técnica interna, escopo, benchmark, contagem de gates obrigatórios, ressalvas e separação entre `evaluation_status`, `recommendation_status`, `general_default` e `production_status`;
+- `available_strategies`: as três estratégias do projeto, separando estratégia disponível de artefato disponível;
+- `provenance`: itens de proveniência, grupos e linha do tempo sanitizada;
+- `quality_gates`: linhas normalizadas com métrica, valor observado, operador, threshold, obrigatoriedade, resultado e fonte.
+
+O frontend deve tratar esses campos como fonte de verdade para a página `Governança`. Valores científicos, thresholds e contagens não devem ser hardcoded no React.
+
 ### `POST /api/generations`
 
 Agenda uma geração assíncrona e retorna `202 Accepted`.

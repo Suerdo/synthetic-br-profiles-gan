@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,21 +94,42 @@ def build_governance_snapshot(config: Any) -> GovernanceSnapshot:
 
 def build_governance_api_snapshot(config: Any) -> dict[str, Any]:
     """Retorna um snapshot tipado e sanitizado para a API React."""
-    snapshot = build_governance_snapshot(config)
-    recommended = recommended_neural_model_public(_resolve_config(config).models_root)
+    resolved = _resolve_config(config)
+    snapshot = build_governance_snapshot(resolved)
+    artifacts = list_saved_model_artifacts(resolved.models_root)
+    recommended_artifact = get_recommended_artifact(resolved.models_root, "ctgan")
+    recommended = None if recommended_artifact is None else artifact_public_summary(recommended_artifact)
     executions = [public_history_row(record) for record in snapshot.history[:100]]
+    evaluated_count = sum(1 for record in snapshot.history if _read_record_evaluation(record))
+    latest_evaluation = next((record for record in snapshot.history if _read_record_evaluation(record)), None)
+    operational_summary = dict(snapshot.overview)
+    operational_summary.update(
+        {
+            "registered_executions": len(snapshot.history),
+            "evaluated_executions": evaluated_count,
+            "latest_evaluation": None if latest_evaluation is None else latest_evaluation.identifier,
+            "strategy_count": 3,
+        }
+    )
     return {
+        "governance_decision": governance_decision_summary(recommended_artifact),
+        "available_strategies": available_strategy_rows(artifacts, resolved),
+        "provenance": provenance_summary(recommended_artifact),
+        "quality_gates": quality_gate_rows(recommended_artifact, snapshot.quality_indicators),
         "operational": {
             "metrics": [
-                _metric("Modelos disponíveis", "available_models", snapshot.overview["available_models"], "Catálogo e registry", "Modelos com geração direta ou artefatos válidos."),
+                _metric("Estratégias disponíveis", "strategy_count", 3, "catálogo do projeto", "Programático, CTGAN e GAN simples existem como estratégias, independentemente de artefato neural."),
                 _metric("Modelo padrão geral", "default_model", snapshot.overview["default_model"], "configs/ui.yaml", "Modelo inicial da interface; não significa melhor desempenho universal."),
                 _metric("Modelo neural recomendado", "recommended_neural_model", None if recommended is None else recommended["artifact_id"], "ModelRegistry", "Artefato neural aprovado internamente, quando disponível."),
-                _metric("Execuções avaliadas", "total_runs", snapshot.overview["total_runs"], "manifestos em artifacts/", "Quantidade de registros operacionais identificados localmente."),
+                _metric("Execuções registradas", "registered_executions", len(snapshot.history), "manifestos em artifacts/", "Quantidade de registros operacionais identificados localmente."),
+                _metric("Execuções com avaliação completa", "evaluated_executions", evaluated_count, "evaluation.json ou manifesto", "Quantidade de registros com avaliação agregada disponível."),
+                _metric("Última avaliação", "latest_evaluation", None if latest_evaluation is None else latest_evaluation.identifier, "evaluation.json ou manifesto", "Registro avaliado mais recente identificado."),
                 _metric("Status das evidências", "pipeline_status", snapshot.overview["pipeline_status"], "manifestos em artifacts/", "Indica se há evidências locais para análise."),
             ],
-            "summary": snapshot.overview,
+            "summary": operational_summary,
         },
         "recommended_model": recommended,
+        "evidence_by_model": governance_evidence_by_model(snapshot.history, artifacts, recommended_artifact),
         "quality": {
             "indicators": snapshot.quality_indicators,
             "status": _section_status(snapshot.quality_indicators),
@@ -127,6 +149,111 @@ def build_governance_api_snapshot(config: Any) -> dict[str, Any]:
     }
 
 
+def governance_evidence_by_model(
+    history: list[HistoryRecord],
+    artifacts: list[SavedModelArtifact],
+    recommended_artifact: SavedModelArtifact | None,
+) -> dict[str, Any]:
+    """Monta evidências sanitizadas por estratégia de modelo."""
+    entries: list[dict[str, Any]] = []
+    for model in ("programmatic", "ctgan", "simple_gan"):
+        entries.append(_model_evidence_entry(model, history, artifacts, recommended_artifact))
+    return {
+        "default_model": "ctgan" if recommended_artifact is not None else "programmatic",
+        "models": entries,
+    }
+
+
+def _model_evidence_entry(
+    model: str,
+    history: list[HistoryRecord],
+    artifacts: list[SavedModelArtifact],
+    recommended_artifact: SavedModelArtifact | None,
+) -> dict[str, Any]:
+    model_history = _history_for_model(history, model)
+    latest_record = model_history[0] if model_history else None
+    evaluation_record = _latest_record_with_evaluation(history, model=model)
+    quality_record = _latest_record_with_quality_gates(history, model=model)
+    artifact = recommended_artifact if model == "ctgan" else _latest_artifact([item for item in artifacts if item.model == model])
+    if model == "ctgan" and recommended_artifact is not None:
+        quality_gates = quality_gate_rows(recommended_artifact, [])
+    else:
+        quality_gates = _quality_gate_rows_from_record(None if quality_record is None else quality_record[0])
+    if not quality_gates and model_history:
+        quality_gates = quality_gate_rows(None, _quality_indicators(model_history))
+    privacy = _diversity_memorization_indicators(history, model=model)
+    income = _conditional_realism_indicators(history, model=model)
+    evidence_status = _model_evidence_status(model, artifact, latest_record)
+    return {
+        "model": model,
+        "label": _model_label(model),
+        "status_label": evidence_status,
+        "role": _model_evidence_role(model),
+        "source_kind": None if latest_record is None else latest_record.kind,
+        "source_identifier": _model_evidence_source_identifier(artifact, evaluation_record, latest_record),
+        "latest_execution_status": None if latest_record is None else latest_record.status,
+        "artifact_id": None if artifact is None else artifact.artifact_id,
+        "has_evidence": bool(quality_gates or _has_available_indicator(privacy) or _has_available_indicator(income)),
+        "quality_gates": quality_gates,
+        "privacy": {
+            "diversity_memorization": privacy,
+            "status": _section_status(privacy),
+        },
+        "income": {
+            "indicators": income,
+            "status": _section_status(income),
+        },
+    }
+
+
+def _model_label(model: str) -> str:
+    return {"programmatic": "Programático", "ctgan": "CTGAN", "simple_gan": "GAN simples"}.get(model, model)
+
+
+def _model_evidence_role(model: str) -> str:
+    roles = {
+        "programmatic": "Padrão geral",
+        "ctgan": "Modelo neural recomendado",
+        "simple_gan": "Experimental",
+    }
+    return roles.get(model, "Estratégia")
+
+
+def _model_evidence_status(model: str, artifact: SavedModelArtifact | None, latest_record: HistoryRecord | None) -> str:
+    if model == "programmatic":
+        return "Padrão geral"
+    if model == "simple_gan":
+        status = latest_record.status if latest_record and latest_record.status else None
+        return "Experimental" if status is None else f"Experimental · {status}"
+    if artifact is not None and artifact.recommended_for_neural_generation:
+        return "Recomendado"
+    if artifact is not None:
+        return artifact.approval_status or artifact.purpose or NOT_EVALUATED
+    return NOT_EVALUATED
+
+
+def _model_evidence_source_identifier(
+    artifact: SavedModelArtifact | None,
+    evaluation_record: tuple[HistoryRecord, dict[str, Any]] | None,
+    latest_record: HistoryRecord | None,
+) -> str | None:
+    if artifact is not None and artifact.model == "ctgan" and artifact.recommended_for_neural_generation:
+        return artifact.artifact_id
+    if evaluation_record is not None:
+        return evaluation_record[0].identifier
+    if latest_record is not None:
+        return latest_record.identifier
+    return None
+
+
+def _history_for_model(history: list[HistoryRecord], model: str) -> list[HistoryRecord]:
+    return [record for record in history if record.model == model]
+
+
+def _has_available_indicator(indicators: list[dict[str, Any]]) -> bool:
+    return any(item.get("value") is not None and item.get("value") != NOT_EVALUATED for item in indicators)
+
+
 def recommended_neural_model_public(models_root: str | Path) -> dict[str, Any] | None:
     artifact = get_recommended_artifact(models_root, "ctgan")
     if artifact is None:
@@ -137,12 +264,18 @@ def recommended_neural_model_public(models_root: str | Path) -> dict[str, Any] |
 def artifact_public_summary(artifact: SavedModelArtifact) -> dict[str, Any]:
     """Retorna resumo público e sanitizado de um artefato de modelo."""
     metrics = artifact_quality_summary(artifact)
+    approval = _approval_manifest(artifact)
     return {
         "artifact_id": artifact.artifact_id,
         "model": artifact.model,
         "status": artifact.approval_status,
         "purpose": artifact.purpose,
+        "evaluation_status": _evaluation_status(artifact),
+        "recommendation_status": "recommended" if artifact.manifest.get("recommended_for_neural_generation") else "not_recommended",
+        "general_default": bool(artifact.manifest.get("general_platform_default")),
+        "production_status": "not_approved",
         "created_at_utc": artifact.created_at_utc,
+        "approved_at_utc": approval.get("approved_at_utc") or artifact.manifest.get("approved_at_utc"),
         "vocabulary_version": artifact.categorical_vocabulary_version,
         "income_model_version": artifact.income_model_version,
         "geography_model_version": artifact.geography_model_version,
@@ -158,6 +291,199 @@ def artifact_public_summary(artifact: SavedModelArtifact) -> dict[str, Any]:
             "Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial."
         ),
     }
+
+
+def governance_decision_summary(artifact: SavedModelArtifact | None) -> dict[str, Any]:
+    """Resume a decisão técnica interna sem expor caminhos locais."""
+    if artifact is None:
+        return {
+            "title": "Decisão de Governança",
+            "status_label": "Não avaliado",
+            "evaluation_status": "not_evaluated",
+            "recommendation_status": "not_recommended",
+            "general_default": False,
+            "production_status": "not_defined",
+            "scope": "Nenhum artefato neural recomendado foi encontrado.",
+            "decided_at_utc": None,
+            "benchmark": None,
+            "mandatory_passed": None,
+            "mandatory_total": None,
+            "caveats_count": None,
+            "artifact_id": None,
+            "model": None,
+            "disclaimer": _approval_disclaimer(),
+        }
+    approval = _approval_manifest(artifact)
+    mandatory = approval.get("mandatory_checks") if isinstance(approval.get("mandatory_checks"), dict) else {}
+    mandatory_total = len(mandatory)
+    mandatory_passed = sum(1 for item in mandatory.values() if isinstance(item, dict) and item.get("passed") is True)
+    limitations = approval.get("known_limitations") if isinstance(approval.get("known_limitations"), list) else artifact.manifest.get("limitations")
+    caveats_count = len(limitations) if isinstance(limitations, list) else 0
+    benchmark = _first_benchmark_id(approval.get("evidence_benchmarks")) or artifact.manifest.get("confirmation_benchmark")
+    approved = artifact.approval_status == "approved" or artifact.purpose == "approved"
+    recommended = bool(artifact.manifest.get("recommended_for_neural_generation"))
+    return {
+        "title": "Decisão de Governança",
+        "status_label": "Aprovado nos gates internos" if approved else "Não aprovado",
+        "evaluation_status": "approved" if approved else (artifact.approval_status or artifact.purpose or "not_evaluated"),
+        "recommendation_status": "recommended" if recommended else "not_recommended",
+        "general_default": bool(artifact.manifest.get("general_platform_default")),
+        "production_status": "not_approved",
+        "scope": "Artefato neural CTGAN com vocabulário v2, renda v3 e geografia v2.",
+        "decided_at_utc": approval.get("approved_at_utc") or artifact.manifest.get("approved_at_utc"),
+        "benchmark": benchmark,
+        "mandatory_passed": mandatory_passed if mandatory_total else None,
+        "mandatory_total": mandatory_total or None,
+        "caveats_count": caveats_count,
+        "artifact_id": artifact.artifact_id,
+        "model": artifact.model,
+        "disclaimer": _approval_disclaimer(),
+    }
+
+
+def available_strategy_rows(artifacts: list[SavedModelArtifact], config: Any) -> list[dict[str, Any]]:
+    """Lista as três estratégias do projeto, separando estratégia de artefato."""
+    resolved = _resolve_config(config)
+    by_model = {
+        "ctgan": [artifact for artifact in artifacts if artifact.model == "ctgan"],
+        "simple_gan": [artifact for artifact in artifacts if artifact.model == "simple_gan"],
+    }
+    recommended_ctgan = get_recommended_artifact(resolved.models_root, "ctgan")
+    return [
+        {
+            "model": "programmatic",
+            "label": "Programático",
+            "role": "Padrão geral da plataforma",
+            "status": "Disponível",
+            "operational_availability": "Disponível",
+            "artifact_required": False,
+            "artifact_available": True,
+            "artifact_count": 0,
+            "recommended_artifact_id": None,
+        },
+        {
+            "model": "ctgan",
+            "label": "CTGAN",
+            "role": "Modelo neural recomendado" if recommended_ctgan else "Estratégia neural avançada",
+            "status": "Artefato aprovado disponível" if recommended_ctgan and recommended_ctgan.approval_status == "approved" else ("Artefato válido disponível" if by_model["ctgan"] else "Sem artefato válido"),
+            "operational_availability": "Disponível" if by_model["ctgan"] else "Indisponível",
+            "artifact_required": True,
+            "artifact_available": bool(by_model["ctgan"]),
+            "artifact_count": len(by_model["ctgan"]),
+            "recommended_artifact_id": None if recommended_ctgan is None else recommended_ctgan.artifact_id,
+        },
+        {
+            "model": "simple_gan",
+            "label": "GAN simples",
+            "role": "Baseline acadêmico experimental",
+            "status": "Artefato válido disponível" if by_model["simple_gan"] else "Sem artefato válido",
+            "operational_availability": "Disponível" if by_model["simple_gan"] else "Indisponível",
+            "artifact_required": True,
+            "artifact_available": bool(by_model["simple_gan"]),
+            "artifact_count": len(by_model["simple_gan"]),
+            "recommended_artifact_id": None,
+        },
+    ]
+
+
+def provenance_summary(artifact: SavedModelArtifact | None) -> dict[str, Any]:
+    """Agrega proveniência reprodutível sem hostname, usuário, paths ou hardware."""
+    if artifact is None:
+        return {"items": [], "groups": [], "timeline": [], "current_code_commit": _current_git_commit_short()}
+    manifest = artifact.manifest
+    approval = _approval_manifest(artifact)
+    metrics = artifact_quality_summary(artifact)
+    environment = _sanitized_environment(manifest)
+    ctgan_config = manifest.get("ctgan_config") if isinstance(manifest.get("ctgan_config"), dict) else {}
+    benchmark = _first_benchmark_id(approval.get("evidence_benchmarks")) or manifest.get("confirmation_benchmark")
+    split_strategy = _split_strategy(manifest)
+    items = [
+        _provenance_item("Artefato", artifact.artifact_id, "training_manifest.json"),
+        _provenance_item("Benchmark", benchmark, "approval_manifest.json"),
+        _provenance_item("Data do artefato", manifest.get("created_at_utc"), "training_manifest.json"),
+        _provenance_item("Data da decisão", approval.get("approved_at_utc") or manifest.get("approved_at_utc"), "approval_manifest.json"),
+        _provenance_item("Seeds", manifest.get("confirmation_seeds"), "approval_manifest.json"),
+        _provenance_item("Commit atual da aplicação", _current_git_commit_short(), ".git/HEAD"),
+        _provenance_item("Treino", manifest.get("train_rows"), "training_manifest.json"),
+        _provenance_item("Holdout", manifest.get("holdout_rows"), "training_manifest.json"),
+        _provenance_item("Calibração", manifest.get("calibration_rows"), "training_manifest.json"),
+        _provenance_item("Estratégia de split", split_strategy, "training_manifest.json"),
+        _provenance_item("Épocas", ctgan_config.get("epochs") or metrics.get("epochs"), "ctgan_config"),
+        _provenance_item("Batch size", ctgan_config.get("batch_size"), "ctgan_config"),
+        _provenance_item("PAC", ctgan_config.get("pac"), "ctgan_config"),
+        _provenance_item("Generator LR", ctgan_config.get("generator_lr"), "ctgan_config"),
+        _provenance_item("Discriminator LR", ctgan_config.get("discriminator_lr"), "ctgan_config"),
+        _provenance_item("Python", environment.get("python"), "training_manifest.json → environment"),
+        _provenance_item("CTGAN", environment.get("ctgan"), "training_manifest.json → environment.library_versions"),
+        _provenance_item("TensorFlow", environment.get("tensorflow"), "training_manifest.json → environment.library_versions"),
+        _provenance_item("Vocabulário", manifest.get("categorical_vocabulary_version"), "training_manifest.json"),
+        _provenance_item("Renda", manifest.get("income_model_version"), "training_manifest.json"),
+        _provenance_item("Geografia", manifest.get("geography_model_version"), "training_manifest.json"),
+        _provenance_item("Checksum geográfico", manifest.get("geography_catalog_checksum"), "training_manifest.json"),
+        _provenance_item("Tamanho do modelo", manifest.get("model_size_bytes"), "training_manifest.json"),
+    ]
+    return {
+        "items": items,
+        "groups": [
+            {"title": "Identificação", "keys": ["Artefato", "Benchmark", "Data do artefato", "Data da decisão", "Seeds", "Commit atual da aplicação"]},
+            {"title": "Dados e split", "keys": ["Treino", "Holdout", "Calibração", "Estratégia de split"]},
+            {"title": "Hiperparâmetros", "keys": ["Épocas", "Batch size", "PAC", "Generator LR", "Discriminator LR"]},
+            {"title": "Ambiente e versões", "keys": ["Python", "CTGAN", "TensorFlow", "Vocabulário", "Renda", "Geografia", "Checksum geográfico", "Tamanho do modelo"]},
+        ],
+        "timeline": [
+            {"step": "Configuração", "source": "ctgan_config", "value": manifest.get("source_profile") or "ctgan_income_v3_geo_v2_candidate"},
+            {"step": "Geração", "source": "benchmark", "value": benchmark},
+            {"step": "Validação", "source": "approval_manifest.json", "value": f"{metrics.get('invalid_rows')} linhas finais inválidas"},
+            {"step": "Avaliação", "source": "evaluation.json", "value": f"{metrics.get('approved_confirmation_seeds')}/{len(metrics.get('confirmation_seeds') or [])} seeds aprovadas" if metrics.get("confirmation_seeds") else None},
+            {"step": "Decisão", "source": "approval_manifest.json", "value": artifact.approval_status},
+            {"step": "Artefato", "source": "training_manifest.json", "value": artifact.artifact_id},
+            {"step": "Rastreabilidade", "source": "manifestos", "value": "manifestos e checksums sanitizados"},
+        ],
+    }
+
+
+def quality_gate_rows(artifact: SavedModelArtifact | None, fallback_indicators: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normaliza checks de qualidade para tabela semântica da interface."""
+    rows: list[dict[str, Any]] = []
+    if artifact is not None:
+        approval = _approval_manifest(artifact)
+        mandatory = approval.get("mandatory_checks") if isinstance(approval.get("mandatory_checks"), dict) else {}
+        for key, payload in mandatory.items():
+            if not isinstance(payload, dict):
+                continue
+            observed, operator, threshold = _gate_observed_operator_threshold(key, payload.get("value"))
+            rows.append(
+                {
+                    "id": key,
+                    "metric": _humanize_gate_key(key),
+                    "observed": observed,
+                    "operator": operator,
+                    "threshold": threshold,
+                    "mandatory": True,
+                    "passed": bool(payload.get("passed")),
+                    "status": "Aprovado" if payload.get("passed") else "Reprovado",
+                    "source": "approval_manifest.json",
+                    "evidence": _sanitize_public_value(payload.get("value")),
+                }
+            )
+    if rows:
+        return rows
+    for indicator in fallback_indicators:
+        rows.append(
+            {
+                "id": indicator.get("metric") or indicator.get("métrica") or indicator.get("indicator"),
+                "metric": indicator.get("indicator") or indicator.get("indicador"),
+                "observed": indicator.get("value"),
+                "operator": "=" if indicator.get("limit") is not None else None,
+                "threshold": indicator.get("limit"),
+                "mandatory": indicator.get("gate_type") == "mandatory",
+                "passed": None if indicator.get("value") is None else True,
+                "status": "Não avaliado" if indicator.get("value") is None else "Aprovado",
+                "source": indicator.get("source") or indicator.get("fonte"),
+                "evidence": None,
+            }
+        )
+    return rows
 
 
 def artifact_quality_summary(artifact: SavedModelArtifact) -> dict[str, Any]:
@@ -302,6 +628,147 @@ def _recommended_row(campo: str, valor: Any, fonte: str, interpretacao: str) -> 
     return {"campo": campo, "valor": valor, "fonte": fonte, "interpretação": interpretacao}
 
 
+def _approval_manifest(artifact: SavedModelArtifact) -> dict[str, Any]:
+    path = artifact.artifact_path / "approval_manifest.json"
+    try:
+        with path.open(encoding="utf-8") as file:
+            loaded = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        loaded = artifact.manifest.get("approval_manifest")
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _approval_disclaimer() -> str:
+    return (
+        "A aprovação representa uma decisão técnica interna baseada nos critérios do projeto. "
+        "Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial."
+    )
+
+
+def _evaluation_status(artifact: SavedModelArtifact) -> str:
+    if artifact.approval_status == "approved" or artifact.purpose == "approved":
+        return "approved"
+    if artifact.approval_status:
+        return str(artifact.approval_status)
+    return str(artifact.purpose or "not_evaluated")
+
+
+def _first_benchmark_id(value: Any) -> str | None:
+    if isinstance(value, list) and value:
+        return _basename_or_identifier(value[0])
+    if isinstance(value, str):
+        return _basename_or_identifier(value)
+    return None
+
+
+def _basename_or_identifier(value: Any) -> str:
+    text = str(value)
+    normalized = text.replace("\\", "/").rstrip("/")
+    if normalized.startswith("artifacts/") or re.search(r"^[A-Za-z]:/", normalized):
+        return normalized.split("/")[-1]
+    return normalized
+
+
+def _provenance_item(label: str, value: Any, source: str) -> dict[str, Any]:
+    return {"label": label, "value": _sanitize_public_value(value), "source": source}
+
+
+def _current_git_commit_short() -> str | None:
+    git_root = Path.cwd() / ".git"
+    head = git_root / "HEAD"
+    try:
+        content = head.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if content.startswith("ref:"):
+        ref = content.split(":", 1)[1].strip()
+        try:
+            content = (git_root / ref).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+    return content[:12] if re.fullmatch(r"[0-9a-fA-F]{40}", content) else None
+
+
+def _split_strategy(manifest: dict[str, Any]) -> str | None:
+    train = manifest.get("train_rows")
+    holdout = manifest.get("holdout_rows")
+    calibration = manifest.get("calibration_rows")
+    if isinstance(train, int) and isinstance(holdout, int) and isinstance(calibration, int) and calibration:
+        fraction = holdout / calibration
+        return f"holdout_fraction={fraction:.2f}"
+    return None
+
+
+def _gate_observed_operator_threshold(key: str, value: Any) -> tuple[Any, str | None, Any]:
+    lower = key.lower()
+    observed = _extract_gate_observed(lower, value)
+    if "zero" in lower:
+        return observed, "=", 0
+    if any(part in lower for part in ("coverage", "known_geography_key_rate", "raw_geographic_validity")):
+        return observed, ">=", 1.0
+    if "version" in lower:
+        return observed, "=", observed
+    if "approved" in lower:
+        return observed, "=", "approved"
+    return observed, None, None
+
+
+def _extract_gate_observed(key: str, value: Any) -> Any:
+    if isinstance(value, (int, float, str, bool)) or value is None:
+        return value
+    if not isinstance(value, dict):
+        return _sanitize_public_value(value)
+    if "zero_duplicate_base" in key:
+        return value.get("duplicate_base_duplicated_occurrences") if value.get("duplicate_base_duplicated_occurrences") is not None else value.get("duplicate_base_row_rate")
+    if "zero_exact_train_match" in key:
+        return value.get("exact_train_match_count") if value.get("exact_train_match_count") is not None else value.get("exact_train_match_rate")
+    if "zero_duplicated_identifiers" in key:
+        return value.get("duplicated_identifiers")
+    if "zero_invalid_rows" in key:
+        return value.get("invalid_rows")
+    for candidate in ("value", "status", "passed", "raw_geographic_validity_rate", "known_geography_key_rate", "coverage_rate"):
+        if value.get(candidate) is not None:
+            return value.get(candidate)
+    return _sanitize_public_value(value)
+
+
+def _humanize_gate_key(key: str) -> str:
+    explicit = {
+        "artifact_exists": "Artefato existente",
+        "benchmark_exists": "Benchmark de confirmação existente",
+        "model_is_ctgan": "Modelo CTGAN",
+        "model_loadable": "Modelo carregável",
+        "categorical_vocabulary_version": "Vocabulário v2",
+        "income_model_version": "Renda v3",
+        "geography_model_version": "Geografia v2",
+        "geography_catalog_checksum": "Checksum geográfico",
+        "external_schema_preserved": "Schema externo preservado",
+        "geo_key_absent_from_public_schema": "Geo_Key ausente da saída pública",
+        "occupational_coverage_documented": "Cobertura ocupacional documentada",
+    }
+    if key in explicit:
+        return explicit[key]
+    cleaned = re.sub(r"^seed_(\d+)_", r"Seed \1: ", key)
+    cleaned = cleaned.replace("_", " ")
+    return cleaned[:1].upper() + cleaned[1:]
+
+
+def _sanitize_public_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if lowered in {"hostname", "username", "user", "ip", "user_agent", "traceback", "cpu_count", "memory_gb", "processor", "platform"}:
+                continue
+            sanitized[str(key)] = _sanitize_public_value(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_public_value(item) for item in value]
+    if isinstance(value, str):
+        return _basename_or_identifier(value)
+    return value
+
+
 def _quality_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
     latest_pipeline = next((record for record in history if record.kind in {"pipeline_run", "ui_generation"}), None)
     if latest_pipeline is None:
@@ -339,8 +806,8 @@ def _quality_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
     ]
 
 
-def _privacy_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
-    latest = _latest_record_with_evaluation(history)
+def _privacy_indicators(history: list[HistoryRecord], *, model: str | None = None) -> list[dict[str, Any]]:
+    latest = _latest_record_with_evaluation(history, model=model)
     if latest is None:
         return [_empty_indicator("Duplicidade de linhas", "duplicate_row_rate"), _empty_indicator("Correspondência exata com treino", "exact_train_match_rate")]
     record, evaluation = latest
@@ -351,8 +818,8 @@ def _privacy_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
     ]
 
 
-def _diversity_memorization_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
-    latest = _latest_record_with_evaluation(history)
+def _diversity_memorization_indicators(history: list[HistoryRecord], *, model: str | None = None) -> list[dict[str, Any]]:
+    latest = _latest_record_with_evaluation(history, model=model)
     if latest is None:
         return [
             _empty_indicator("Combinações-base únicas", "privacy.unique_combinations"),
@@ -384,8 +851,8 @@ def _diversity_memorization_indicators(history: list[HistoryRecord]) -> list[dic
     ]
 
 
-def _conditional_realism_indicators(history: list[HistoryRecord]) -> list[dict[str, Any]]:
-    latest = _latest_record_with_evaluation(history)
+def _conditional_realism_indicators(history: list[HistoryRecord], *, model: str | None = None) -> list[dict[str, Any]]:
+    latest = _latest_record_with_evaluation(history, model=model)
     if latest is None:
         return [
             _empty_indicator("Versão do modelo de renda", "manifest.income_model_version"),
@@ -485,11 +952,23 @@ def _empty_indicator(label: str, metric: str) -> dict[str, Any]:
     return indicator
 
 
-def _latest_record_with_evaluation(history: list[HistoryRecord]) -> tuple[HistoryRecord, dict[str, Any]] | None:
+def _latest_record_with_evaluation(history: list[HistoryRecord], *, model: str | None = None) -> tuple[HistoryRecord, dict[str, Any]] | None:
     for record in history:
+        if model is not None and record.model != model:
+            continue
         evaluation = _read_record_evaluation(record)
         if evaluation:
             return record, evaluation
+    return None
+
+
+def _latest_record_with_quality_gates(history: list[HistoryRecord], *, model: str | None = None) -> tuple[HistoryRecord, dict[str, Any]] | None:
+    for record in history:
+        if model is not None and record.model != model:
+            continue
+        quality_gates = _read_record_quality_gates(record)
+        if quality_gates:
+            return record, quality_gates
     return None
 
 
@@ -500,13 +979,111 @@ def _read_record_evaluation(record: HistoryRecord) -> dict[str, Any]:
         return embedded
     sibling = record.path.parent / "evaluation.json"
     if not sibling.exists():
-        return {}
+        status_file = _record_status_artifact(record, "evaluation.json")
+        if status_file is None:
+            return {}
+        sibling = status_file
     try:
         with sibling.open(encoding="utf-8") as file:
             loaded = json.load(file)
     except (OSError, json.JSONDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _read_record_quality_gates(record: HistoryRecord) -> dict[str, Any]:
+    manifest = record.manifest if isinstance(record.manifest, dict) else {}
+    embedded = manifest.get("quality_gates")
+    if isinstance(embedded, dict) and embedded:
+        return embedded
+    sibling = record.path.parent / "quality_gates.json"
+    if not sibling.exists():
+        status_file = _record_status_artifact(record, "quality_gates.json")
+        if status_file is None:
+            return {}
+        sibling = status_file
+    try:
+        with sibling.open(encoding="utf-8") as file:
+            loaded = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _record_status_artifact(record: HistoryRecord, filename: str) -> Path | None:
+    parent = record.path.parent
+    status_candidates = []
+    if record.status:
+        status = str(record.status)
+        status_candidates.extend([status, status.replace("quarantined", "quarantine")])
+    status_candidates.extend(["approved", "quarantine", "quarantined", "rejected", "failed"])
+    for status in dict.fromkeys(status_candidates):
+        candidate = parent / status / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _quality_gate_rows_from_record(record: HistoryRecord | None) -> list[dict[str, Any]]:
+    if record is None:
+        return []
+    payload = _read_record_quality_gates(record)
+    metrics = payload.get("metrics_checked") if isinstance(payload.get("metrics_checked"), dict) else {}
+    failures = payload.get("failures") if isinstance(payload.get("failures"), list) else []
+    if not metrics and not failures:
+        return []
+    failures_by_metric = {
+        str(item.get("metric") or item.get("gate")): item
+        for item in failures
+        if isinstance(item, dict)
+    }
+    rows: list[dict[str, Any]] = []
+    for metric, value in metrics.items():
+        failure = failures_by_metric.get(str(metric))
+        mandatory = _metric_is_mandatory(metric, failure)
+        rows.append(
+            {
+                "id": str(metric),
+                "metric": _humanize_gate_key(str(metric)),
+                "observed": _sanitize_public_value(value),
+                "operator": None if failure is None else "<=",
+                "threshold": None if failure is None else _sanitize_public_value(failure.get("limit")),
+                "mandatory": mandatory,
+                "passed": failure is None,
+                "status": "Aprovado" if failure is None else ("Reprovado" if mandatory else "Quarentena"),
+                "source": "quality_gates.json",
+                "evidence": _sanitize_public_value(value),
+            }
+        )
+    for index, failure in enumerate(failures):
+        if not isinstance(failure, dict):
+            continue
+        metric = str(failure.get("metric") or failure.get("gate") or f"failure_{index}")
+        if metric in metrics:
+            continue
+        mandatory = bool(failure.get("mandatory"))
+        rows.append(
+            {
+                "id": str(failure.get("gate") or metric),
+                "metric": _humanize_gate_key(metric),
+                "observed": _sanitize_public_value(failure.get("value")),
+                "operator": "<=" if failure.get("limit") is not None else None,
+                "threshold": _sanitize_public_value(failure.get("limit")),
+                "mandatory": mandatory,
+                "passed": False,
+                "status": "Reprovado" if mandatory else "Quarentena",
+                "source": "quality_gates.json",
+                "evidence": _sanitize_public_value(failure),
+            }
+        )
+    return rows
+
+
+def _metric_is_mandatory(metric: Any, failure: Any) -> bool:
+    if isinstance(failure, dict) and failure.get("mandatory") is not None:
+        return bool(failure.get("mandatory"))
+    name = str(metric)
+    return name in {"invalid_rows", "null_required_fields", "duplicated_identifier", "exact_train_match_rate"}
 
 
 def _resolve_config(config: Any) -> GovernanceSourceConfig:

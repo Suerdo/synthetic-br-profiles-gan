@@ -1,11 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, BrainCircuit, Database, FlaskConical } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { getModelArtifacts, getModels } from "../api";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
+import { isTechnicalValue, TechnicalValue } from "../components/ui/TechnicalValue";
 import type { ModelArtifact, ModelEntry, ModelName } from "../types/api";
 import { formatBytes, formatDate, formatNumber, formatRate } from "../utils/format";
+import { modelDisplayName, statusDisplayName } from "../utils/labels";
 
 const modelOrder: ModelName[] = ["programmatic", "ctgan", "simple_gan"];
 
@@ -19,8 +22,8 @@ export function ModelsPage() {
   const selectedEntry = entries.find((entry) => entry.name === selectedModel) ?? entries[0];
 
   return (
-    <div className="space-y-6">
-      <header>
+    <div className="mx-auto max-w-7xl space-y-7">
+      <header className="max-w-4xl">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blueAction">Modelos</p>
         <h1 className="mt-2 text-3xl font-bold text-slateInk">Modelos</h1>
         <p className="mt-2 max-w-3xl text-base leading-7 text-slate-600">
@@ -53,6 +56,7 @@ export function ModelsPage() {
 
 function ModelCard({ entry, active, onSelect }: { entry: ModelEntry; active: boolean; onSelect: () => void }) {
   const mainBadge = badgeForModel(entry);
+  const Icon = entry.name === "programmatic" ? Database : entry.name === "ctgan" ? BrainCircuit : FlaskConical;
   const version = entry.recommended_artifact
     ? `Vocabulário v${entry.recommended_artifact.vocabulary_version} · Renda v${entry.recommended_artifact.income_model_version} · Geografia v${entry.recommended_artifact.geography_model_version}`
     : entry.requires_saved_artifact
@@ -63,20 +67,28 @@ function ModelCard({ entry, active, onSelect }: { entry: ModelEntry; active: boo
     <button
       type="button"
       onClick={onSelect}
-      className={`rounded-xl border bg-white p-5 text-left shadow-card transition hover:border-blue-300 ${
-        active ? "border-blueAction ring-2 ring-blue-100" : "border-borderSoft"
+      className={`relative min-w-0 rounded-xl border p-5 text-left shadow-card transition hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200 ${
+        active ? "border-blueAction bg-blue-50/60 ring-2 ring-blue-100" : "border-borderSoft bg-white"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-xl font-bold text-slateInk">{cleanModelName(entry)}</h2>
+      {active ? <span className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-blueAction" aria-hidden="true" /> : null}
+      <div className="flex items-start justify-between gap-3">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blueAction">
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </span>
         <Badge tone={mainBadge.tone}>{mainBadge.label}</Badge>
       </div>
-      <p className="mt-3 text-sm leading-6 text-slate-600">{entry.short_description}</p>
+      <h2 className="mt-4 text-xl font-bold text-slateInk">{cleanModelName(entry)}</h2>
+      <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{entry.short_description}</p>
       <dl className="mt-4 space-y-2 text-sm">
         <CardLine label="Disponibilidade" value={entry.available ? "Disponível" : "Não disponível"} />
-        <CardLine label="Indicação" value={entry.recommended_use_cases.slice(0, 3).join(", ") || "Não avaliado"} />
+        <CardLine label="Indicação principal" value={entry.recommended_use_cases.slice(0, 2).join(", ") || "Não avaliado"} />
         <CardLine label="Versões" value={version} />
       </dl>
+      <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-blueAction">
+        Ver Detalhes
+        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+      </span>
     </button>
   );
 }
@@ -95,20 +107,20 @@ function ModelDetails({ entry }: { entry: ModelEntry }) {
     null;
 
   return (
-    <Card>
+    <Card className="border-blue-100">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-2xl font-bold text-slateInk">{entry.title}</h2>
         <Badge tone={badgeForModel(entry).tone}>{badgeForModel(entry).label}</Badge>
-        {selectedArtifact?.recommended_for_neural_generation ? <Badge tone="approved">Artefato neural recomendado</Badge> : null}
+        {selectedArtifact?.recommended_for_neural_generation ? <Badge tone="approved">Artefato Neural Recomendado</Badge> : null}
       </div>
       <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600">{entry.detailed_description}</p>
 
       <div className="mt-5 grid items-stretch gap-4 md:grid-cols-2">
-        <SummaryCard title="Resumo simples">{entry.simple_summary || entry.summary}</SummaryCard>
-        <SummaryCard title="Resumo técnico">{entry.technical_summary}</SummaryCard>
+        <SummaryCard title="Resumo Simples">{entry.simple_summary || entry.summary}</SummaryCard>
+        <SummaryCard title="Resumo Técnico">{entry.technical_summary}</SummaryCard>
       </div>
 
-      <h3 className="mt-6 font-bold text-slateInk">Usos recomendados</h3>
+      <h3 className="mt-6 font-bold text-slateInk">Usos Recomendados</h3>
       <p className="mt-2 text-sm leading-6 text-slate-700">{entry.recommended_for}</p>
 
       {entry.requires_saved_artifact ? (
@@ -152,19 +164,19 @@ function ArtifactPanel({
 }) {
   if (loading) return <LoadingCard text="Carregando artefatos válidos..." className="mt-5" />;
   if (error) return <ErrorCard text="Não foi possível carregar os artefatos deste modelo." className="mt-5" />;
-  if (!artifact) return <EmptyCard text={emptyMessage ?? `Nenhum artefato ${model} válido foi encontrado.`} className="mt-5" />;
+  if (!artifact) return <EmptyCard text={emptyMessage ?? `Nenhum artefato ${modelDisplayName(model)} válido foi encontrado.`} className="mt-5" />;
 
   return (
     <div className="mt-5 rounded-xl border border-borderSoft bg-panel p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-lg font-bold text-slateInk">Artefato selecionado</h3>
-        <Badge tone={artifact.approved ? "approved" : artifact.recommended ? "candidate" : "neutral"}>{artifact.status}</Badge>
+        <h3 className="text-lg font-bold text-slateInk">Artefato Selecionado</h3>
+        <Badge tone={artifact.approved ? "approved" : artifact.recommended ? "candidate" : "neutral"}>{statusDisplayName(artifact.status)}</Badge>
       </div>
       {artifact.warning ? <p className="mt-3 rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800">{artifact.warning}</p> : null}
       <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
         <Summary label="Identificador" value={artifact.artifact_id} />
         <Summary label="Criado em" value={formatDate(artifact.created_at_utc)} />
-        <Summary label="Status" value={artifact.status} />
+        <Summary label="Status" value={statusDisplayName(artifact.status)} />
         <Summary label="Vocabulário" value={`v${artifact.vocabulary_version}`} />
         <Summary label="Renda" value={`v${artifact.income_model_version}`} />
         <Summary label="Geografia" value={`v${artifact.geography_model_version}`} />
@@ -180,32 +192,30 @@ function ArtifactPanel({
       </div>
 
       <details className="mt-5 rounded-lg border border-borderSoft bg-white p-4">
-        <summary className="cursor-pointer font-semibold text-slateInk">Outros artefatos disponíveis</summary>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full border-collapse text-left text-sm">
-            <thead>
-              <tr className="bg-slate-200 text-slateInk">
-                <th className="border border-borderSoft px-3 py-2">Artefato</th>
-                <th className="border border-borderSoft px-3 py-2">Criado em</th>
-                <th className="border border-borderSoft px-3 py-2">Vocabulário</th>
-                <th className="border border-borderSoft px-3 py-2">Renda</th>
-                <th className="border border-borderSoft px-3 py-2">Geografia</th>
-                <th className="border border-borderSoft px-3 py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {artifacts.map((item) => (
-                <tr key={item.artifact_id} className="odd:bg-white even:bg-panel">
-                  <td className="border border-borderSoft px-3 py-2">{item.artifact_id}</td>
-                  <td className="border border-borderSoft px-3 py-2">{formatDate(item.created_at_utc)}</td>
-                  <td className="border border-borderSoft px-3 py-2">v{item.vocabulary_version}</td>
-                  <td className="border border-borderSoft px-3 py-2">v{item.income_model_version}</td>
-                  <td className="border border-borderSoft px-3 py-2">v{item.geography_model_version}</td>
-                  <td className="border border-borderSoft px-3 py-2">{item.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <summary className="cursor-pointer font-semibold text-slateInk">Outros Artefatos Disponíveis</summary>
+        <div className="mt-4 grid gap-3">
+          {artifacts.map((item) => (
+            <div key={item.artifact_id} className="min-w-0 rounded-lg border border-borderSoft bg-panel p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <TechnicalValue value={item.artifact_id} />
+                <Badge tone={item.approved ? "approved" : item.recommended ? "candidate" : "neutral"}>{statusDisplayName(item.status)}</Badge>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-4">
+                <span>Criado em: {formatDate(item.created_at_utc)}</span>
+                <span>Vocabulário v{item.vocabulary_version}</span>
+                <span>Renda v{item.income_model_version}</span>
+                <span>Geografia v{item.geography_model_version}</span>
+              </div>
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs font-semibold text-blueAction">Ver Detalhes</summary>
+                <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+                  <Summary label="Treino" value={formatNumber(item.train_rows)} />
+                  <Summary label="Duplicidade-base" value={formatRate(item.duplicate_base_row_rate)} />
+                  <Summary label="Match treino" value={formatRate(item.exact_train_match_rate)} />
+                </div>
+              </details>
+            </div>
+          ))}
         </div>
       </details>
     </div>
@@ -239,19 +249,24 @@ function DetailList({ title, items, className = "" }: { title: string; items: st
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
+  const technical = isTechnicalValue(label, value);
   return (
-    <div className="rounded-lg border border-borderSoft bg-white p-3">
+    <div className="min-w-0 rounded-lg border border-borderSoft bg-white p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 break-words text-sm font-bold text-slateInk">{value}</p>
+      <div className="mt-1 min-w-0 text-sm font-bold text-slateInk">
+        {technical ? <TechnicalValue value={value} /> : <span className="break-words">{value}</span>}
+      </div>
     </div>
   );
 }
 
-function CardLine({ label, value }: { label: string; value: string }) {
+function CardLine({ label, value, technical = false }: { label: string; value: string; technical?: boolean }) {
   return (
-    <div className="flex justify-between gap-3">
+    <div className="grid min-w-0 gap-1 sm:grid-cols-[auto_minmax(0,1fr)]">
       <dt className="text-slate-500">{label}</dt>
-      <dd className="text-right font-semibold text-slateInk">{value}</dd>
+      <dd className="min-w-0 text-left font-semibold text-slateInk sm:text-right">
+        {technical || isTechnicalValue(label, value) ? <TechnicalValue value={value} copyable={false} /> : value}
+      </dd>
     </div>
   );
 }
@@ -269,16 +284,14 @@ function EmptyCard({ text, className = "" }: { text: string; className?: string 
 }
 
 function cleanModelName(entry: ModelEntry): string {
-  if (entry.name === "programmatic") return "Programático";
-  if (entry.name === "simple_gan") return "GAN Simples";
-  return "CTGAN";
+  return modelDisplayName(entry.name);
 }
 
 function badgeForModel(entry: ModelEntry): { label: string; tone: "approved" | "recommended" | "experimental" | "neutral" } {
-  if (entry.name === "programmatic") return { label: "Padrão geral", tone: "recommended" };
+  if (entry.name === "programmatic") return { label: "Padrão Geral", tone: "recommended" };
   if (entry.name === "simple_gan") return { label: "Experimental", tone: "experimental" };
   if (entry.recommended_artifact?.approved || entry.recommended_artifact?.recommended_for_neural_generation) {
     return { label: "Recomendado", tone: "approved" };
   }
-  return { label: "Artefato neural", tone: "neutral" };
+  return { label: "Artefato Neural", tone: "neutral" };
 }

@@ -1,5 +1,6 @@
 import { Database, FileText, Scale } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { BrandLockup } from "./BrandLockup";
 
 const items = [
   { to: "/", label: "Gerar Dados", icon: Database },
@@ -7,11 +8,11 @@ const items = [
   { to: "/governanca", label: "Governança", icon: Scale }
 ];
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <aside className="w-full border-r border-slate-700 bg-slateInk text-slate-100 lg:min-h-screen lg:w-72">
+    <aside className="h-full w-full border-r border-slate-700 bg-slateInk text-slate-100 lg:min-h-screen lg:w-72">
       <div className="px-5 py-6">
-        <h1 className="text-xl font-bold text-white">Dados Sintéticos Brasileiro</h1>
+        <BrandLockup />
       </div>
       <nav className="space-y-1 px-3 pb-5" aria-label="Navegação principal">
         {items.map((item) => {
@@ -21,6 +22,7 @@ export function Sidebar() {
               key={item.to}
               to={item.to}
               end={item.to === "/"}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
                   isActive

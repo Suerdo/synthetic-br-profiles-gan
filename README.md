@@ -448,6 +448,8 @@ A API expõe apenas metadados, artefatos administrados, governança sanitizada e
 
 As páginas React disponíveis são `Gerar dados`, `Modelos` e `Governança`. A página `Modelos` consome `/api/models`, `/api/models/{model}` e `/api/models/{model}/recommended`. A página `Governança` consome `/api/governance` e os endpoints seccionados para resumo, qualidade, privacidade, renda, execuções e auditoria. Valores ausentes são exibidos como `Não avaliado`, e as respostas não expõem caminhos absolutos, stack traces ou detalhes sensíveis do ambiente local.
 
+A página `Governança` do React foi refinada para organizar as evidências como uma narrativa: `configuração → geração → validação → avaliação → evidências → decisão → artefato → rastreabilidade`. Ela separa `evaluation_status`, `recommendation_status`, `general_default` e `production_status`, mostra as três estratégias do projeto mesmo quando um artefato neural está ausente e mantém auditoria e glossário recolhidos por padrão.
+
 Consulte `docs/api.md` e `docs/react-frontend.md`.
 
 ## Diversidade, memorização e renda condicional

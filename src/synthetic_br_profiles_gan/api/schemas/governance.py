@@ -32,6 +32,11 @@ class GovernanceOperationalResponse(StrictBaseModel):
 class GovernanceSnapshotResponse(StrictBaseModel):
     """Snapshot público de governança sem caminhos locais nem dados sensíveis."""
 
+    governance_decision: dict[str, Any]
+    available_strategies: list[dict[str, Any]]
+    provenance: dict[str, Any]
+    quality_gates: list[dict[str, Any]]
+    evidence_by_model: dict[str, Any]
     operational: GovernanceOperationalResponse
     recommended_model: dict[str, Any] | None
     quality: GovernanceSectionResponse

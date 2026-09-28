@@ -185,3 +185,15 @@ As páginas React `Modelos` e `Governança` consomem endpoints próprios da API.
 Os serviços de histórico, governança e auditoria foram movidos para `synthetic_br_profiles_gan.services` para uso compartilhado por FastAPI e Streamlit. Os módulos em `synthetic_br_profiles_gan.ui.services` permanecem como wrappers de compatibilidade para a interface Streamlit.
 
 Essa fase não implementa treinamento pela interface, upload de modelos, histórico persistente, autenticação, banco de dados ou filas externas. A documentação operacional da nova interface está em `docs/react-frontend.md`.
+
+### Governança no React
+
+A página `Governança` do React foi refinada para responder quatro perguntas: o que foi avaliado, com qual artefato, quais critérios foram atendidos e quais ressalvas permanecem. A página segue a cadeia:
+
+```text
+configuração → geração → validação → avaliação → evidências → decisão → artefato → rastreabilidade
+```
+
+A decisão separa `evaluation_status`, `recommendation_status`, `general_default` e `production_status`. Portanto, a CTGAN aprovada pode ser recomendada como artefato neural sem substituir o modelo programático como padrão geral e sem ser descrita como produção.
+
+As seções `Trilha de Auditoria` e `Glossário e Metodologia` ficam recolhidas por padrão. A API fornece evidências agregadas e sanitizadas; o React não lê datasets completos nem caminhos locais.

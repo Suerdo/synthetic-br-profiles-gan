@@ -110,3 +110,32 @@ Os nomes de arquivos são descritivos e não expõem caminhos internos.
 - não há treinamento pela interface.
 
 A interface Streamlit permanece disponível e não foi removida.
+
+## Governança refinada
+
+A página `Governança` foi reorganizada para contar a história técnica da decisão, e não apenas exibir um painel de métricas. A ordem visual é:
+
+1. `Status e Decisão de Governança`;
+2. `Estratégias / Modelos Disponíveis`;
+3. `Modelo Neural Recomendado`;
+4. `Proveniência e Reprodutibilidade`;
+5. `Quality Gates`;
+6. `Privacidade, Diversidade e Memorização`;
+7. `Realismo e Fidelidade Estatística`;
+8. `Execuções Recentes`;
+9. `Trilha de Auditoria`, recolhida por padrão;
+10. `Glossário e Metodologia`, recolhido por padrão.
+
+A cadeia conceitual exibida é:
+
+```text
+configuração → geração → validação → avaliação → evidências → decisão → artefato → rastreabilidade
+```
+
+Os estados são separados no contrato e na interface: `evaluation_status`, `recommendation_status`, `general_default` e `production_status`. Assim, a CTGAN pode estar aprovada internamente e recomendada como artefato neural sem se tornar o padrão geral da plataforma e sem receber status de produção.
+
+## Dados e segurança da API
+
+Números científicos, thresholds, disponibilidade de artefatos, proveniência e quality gates vêm da API. O React não codifica valores como `100%`, `3/3` ou limites de gates. A API entrega metadados sanitizados: não expõe hostname, usuário local, caminhos absolutos, IP, user agent, hardware, variáveis de ambiente, caminhos CUDA, stack traces, datasets brutos ou valores individuais gerados.
+
+Nenhuma biblioteca nova foi adicionada nesta fase. O refinamento usa React, TypeScript, Tailwind e Lucide já presentes no frontend.

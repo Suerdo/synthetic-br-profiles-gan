@@ -215,3 +215,35 @@ Cobertura ocupacional:
 A ausência isolada de `Diretor` não foi interpretada como colapso geral, mas permanece como limitação visível.
 
 A aprovação representa uma decisão interna baseada nos critérios técnicos do projeto. Ela não constitui certificação externa, garantia de anonimização ou validação populacional oficial.
+
+## Organização da Governança no React
+
+A interface React apresenta a governança como narrativa de rastreabilidade, não como dashboard genérico. A ordem da página é:
+
+1. `Status e Decisão de Governança`;
+2. `Estratégias / Modelos Disponíveis`;
+3. `Modelo Neural Recomendado`;
+4. `Proveniência e Reprodutibilidade`;
+5. `Quality Gates`;
+6. `Privacidade, Diversidade e Memorização`;
+7. `Realismo e Fidelidade Estatística`;
+8. `Execuções Recentes`;
+9. `Trilha de Auditoria`, recolhida por padrão;
+10. `Glossário e Metodologia`, recolhido por padrão.
+
+A cadeia conceitual usada na página é:
+
+```text
+configuração → geração → validação → avaliação → evidências → decisão → artefato → rastreabilidade
+```
+
+Os estados exibidos são separados:
+
+- `evaluation_status`: resultado interno da avaliação técnica;
+- `recommendation_status`: recomendação de uso neural;
+- `general_default`: indica se o artefato é o padrão geral da plataforma;
+- `production_status`: indica se existe uma decisão de produção. A aprovação técnica interna não implica produção.
+
+As três estratégias continuam visíveis: `programmatic` como padrão geral, `ctgan` como estratégia neural recomendada quando houver artefato aprovado e `simple_gan` como baseline acadêmico experimental. A disponibilidade de estratégia e a disponibilidade de artefato são exibidas separadamente.
+
+Os dados científicos apresentados pela interface vêm da API e dos serviços compartilhados. A UI não codifica thresholds, contagens ou percentuais de aprovação. Quando a evidência não existe, a API preserva `null` e a interface apresenta `Não avaliado`.

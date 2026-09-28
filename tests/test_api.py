@@ -194,6 +194,21 @@ class ApiTest(unittest.TestCase):
             self.assertNotIn("username", dumped)
 
         payload = self.client.get("/api/governance").json()
+        self.assertEqual(payload["governance_decision"]["evaluation_status"], "approved")
+        self.assertEqual(payload["governance_decision"]["recommendation_status"], "recommended")
+        self.assertFalse(payload["governance_decision"]["general_default"])
+        self.assertEqual(payload["governance_decision"]["production_status"], "not_approved")
+        self.assertEqual(payload["governance_decision"]["mandatory_passed"], 3)
+        self.assertEqual(payload["governance_decision"]["mandatory_total"], 3)
+        self.assertEqual(len(payload["available_strategies"]), 3)
+        strategies = {item["model"]: item for item in payload["available_strategies"]}
+        self.assertEqual(strategies["programmatic"]["role"], "Padrão geral da plataforma")
+        self.assertEqual(strategies["ctgan"]["recommended_artifact_id"], "ctgan/approved")
+        self.assertEqual(strategies["simple_gan"]["role"], "Baseline acadêmico experimental")
+        self.assertTrue(payload["quality_gates"])
+        self.assertTrue(all("source" in gate for gate in payload["quality_gates"]))
+        self.assertTrue(any(gate["mandatory"] for gate in payload["quality_gates"]))
+        self.assertTrue(any(item["label"] == "Benchmark" for item in payload["provenance"]["items"]))
         self.assertEqual(payload["recommended_model"]["metrics"]["duplicate_base_row_rate"], 0.0)
         self.assertIsNone(payload["recommended_model"]["metrics"]["conditional_income_status"])
         self.assertTrue(any(item["term"] == "Geo_Key" for item in payload["glossary"]))
@@ -204,8 +219,35 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIsNone(payload["recommended_model"])
+        self.assertEqual(len(payload["available_strategies"]), 3)
+        self.assertEqual(payload["governance_decision"]["evaluation_status"], "not_evaluated")
+        self.assertFalse(payload["governance_decision"]["general_default"])
+        self.assertEqual(payload["provenance"]["items"], [])
         values = [item["value"] for item in payload["operational"]["metrics"]]
         self.assertIn(None, values)
+
+    def test_governance_evidence_is_available_per_model(self) -> None:
+        _write_fake_ctgan_artifact(self.settings.models_root / "ctgan" / "approved", include_evidence=True)
+        _write_fake_governance_run(self.settings.artifacts_root, "programmatic", "approved", 0.00005, 0.059)
+        _write_fake_governance_run(self.settings.artifacts_root, "simple_gan", "quarantined", None, 0.984)
+
+        response = self.client.get("/api/governance")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        evidence = payload["evidence_by_model"]
+        self.assertEqual(evidence["default_model"], "ctgan")
+        by_model = {item["model"]: item for item in evidence["models"]}
+        self.assertEqual(set(by_model), {"programmatic", "ctgan", "simple_gan"})
+        self.assertEqual(by_model["programmatic"]["source_identifier"], "run-programmatic")
+        self.assertEqual(by_model["programmatic"]["privacy"]["diversity_memorization"][6]["value"], 0.00005)
+        self.assertEqual(by_model["ctgan"]["artifact_id"], "ctgan/approved")
+        self.assertTrue(by_model["ctgan"]["quality_gates"])
+        self.assertIn("Experimental", by_model["simple_gan"]["status_label"])
+        self.assertEqual(by_model["simple_gan"]["latest_execution_status"], "quarantined")
+        self.assertIsNone(by_model["simple_gan"]["privacy"]["diversity_memorization"][6]["value"])
+        dumped = json.dumps(payload, ensure_ascii=False).lower()
+        self.assertNotIn(str(self.settings.artifacts_root).lower(), dumped)
 
     def _wait_for_completion(self, generation_id: str) -> dict[str, object]:
         for _ in range(30):
@@ -250,6 +292,91 @@ def _fake_run_generation(request) -> GenerationResult:
     )
 
 
+def _write_fake_governance_run(
+    artifacts_root: Path,
+    model: str,
+    status: str,
+    exact_train_match_rate: float | None,
+    total_variation_distance: float | None,
+) -> Path:
+    run_id = f"run-{model}"
+    root = artifacts_root / "runs" / run_id
+    status_dir_name = "quarantine" if status == "quarantined" else status
+    status_dir = root / status_dir_name
+    status_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "run_id": run_id,
+        "model": model,
+        "status": status,
+        "generated_rows": 20000,
+        "timestamp_utc": "2026-07-30T00:00:00Z",
+        "seed": 41,
+        "categorical_vocabulary_version": 2,
+        "income_model_version": 3,
+    }
+    (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    evaluation = {
+        "privacy": {
+            "unique_combinations": 19990,
+            "unique_combination_rate": 0.9995,
+            "duplicate_base_rows": {
+                "duplicated_occurrences": 0,
+                "duplicated_groups": 0,
+                "duplicate_row_rate": 0.0,
+            },
+            "exact_matches": {
+                "train": {
+                    "exact_match_count": None if exact_train_match_rate is None else int(exact_train_match_rate * 20000),
+                    "exact_match_rate": exact_train_match_rate,
+                },
+                "holdout": {
+                    "exact_match_count": 0,
+                    "exact_match_rate": 0.0,
+                },
+            },
+            "nearest_neighbor_train": {
+                "distance_to_closest_record": {"mean": 0.25},
+                "nearest_neighbor_distance_ratio": {"mean": 0.7},
+            },
+        },
+        "conditional_income": {
+            "summary": {
+                "conditional_groups_compared": 12,
+                "max_conditional_income_wasserstein": 120.5,
+                "max_abs_p95_difference": 80.0,
+                "max_abs_p99_difference": None if model == "simple_gan" else 100.0,
+                "groups_with_excessive_tail": 0,
+                "status": "avaliado",
+            }
+        },
+    }
+    quality_gates = {
+        "failures": [
+            {
+                "gate": "total_variation_distance_max",
+                "metric": "total_variation_distance",
+                "value": total_variation_distance,
+                "limit": 0.25,
+                "mandatory": False,
+                "reason": "threshold_failed",
+            }
+        ]
+        if total_variation_distance is not None and total_variation_distance > 0.25
+        else [],
+        "metrics_checked": {
+            "invalid_rows": 0,
+            "duplicated_identifier": 0.0,
+            "exact_train_match_rate": exact_train_match_rate,
+            "duplicate_base_row_rate": 0.0,
+            "total_variation_distance": total_variation_distance,
+        },
+        "status": status,
+    }
+    (status_dir / "evaluation.json").write_text(json.dumps(evaluation, ensure_ascii=False), encoding="utf-8")
+    (status_dir / "quality_gates.json").write_text(json.dumps(quality_gates, ensure_ascii=False), encoding="utf-8")
+    return root
+
+
 def _write_fake_ctgan_artifact(path: Path, *, include_evidence: bool = False) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -284,6 +411,10 @@ def _write_fake_ctgan_artifact(path: Path, *, include_evidence: bool = False) ->
             {
                 "confirmation_benchmark": "ctgan-confirmation",
                 "confirmation_seeds": [47, 48, 49],
+                "holdout_rows": 5000,
+                "calibration_rows": 25000,
+                "model_size_bytes": 3072000,
+                "ctgan_config": {"epochs": 20, "batch_size": 500, "pac": 10, "generator_lr": 0.0002, "discriminator_lr": 0.0002},
                 "approval_evidence_summary": {
                     "approved_runs": 3,
                     "by_seed": {
@@ -312,6 +443,26 @@ def _write_fake_ctgan_artifact(path: Path, *, include_evidence: bool = False) ->
             }
         )
     (path / "training_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    if include_evidence:
+        approval_manifest = {
+            "artifact_id": "ctgan/approved",
+            "previous_status": "recommended_candidate",
+            "new_status": "approved",
+            "approved_at_utc": "2026-07-30T12:32:08Z",
+            "decision_type": "internal_technical_approval",
+            "evidence_benchmarks": ["artifacts/benchmarks/ctgan-confirmation"],
+            "confirmation_seeds": [47, 48, 49],
+            "mandatory_checks": {
+                "zero_invalid_rows": {"passed": True, "value": {"invalid_rows": 0, "path": "C:/secret/validation.json"}},
+                "zero_duplicate_base": {"passed": True, "value": {"duplicate_base_row_rate": 0.0, "duplicate_base_duplicated_occurrences": 0}},
+                "zero_exact_train_match": {"passed": True, "value": {"exact_train_match_rate": 0.0, "exact_train_match_count": 0}},
+            },
+            "known_limitations": ["Diretor ausente na seed 48."],
+            "recommended_for_neural_generation": True,
+            "general_platform_default": False,
+            "approval_note": "Decisão técnica interna; não constitui certificação externa.",
+        }
+        (path / "approval_manifest.json").write_text(json.dumps(approval_manifest, ensure_ascii=False), encoding="utf-8")
     for name in ["model.pkl", "metadata.json", "metadata_ctgan.json"]:
         (path / name).write_text("{}", encoding="utf-8")
     return path

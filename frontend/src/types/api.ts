@@ -153,7 +153,92 @@ export interface GovernanceMetric {
   help: string;
 }
 
+export interface GovernanceDecision {
+  title: string;
+  status_label: string;
+  evaluation_status: string;
+  recommendation_status: string;
+  general_default: boolean;
+  production_status: string;
+  scope: string;
+  decided_at_utc: string | null;
+  benchmark: string | null;
+  mandatory_passed: number | null;
+  mandatory_total: number | null;
+  caveats_count: number | null;
+  artifact_id: string | null;
+  model: string | null;
+  disclaimer: string;
+}
+
+export interface GovernanceStrategy {
+  model: ModelName;
+  label: string;
+  role: string;
+  status: string;
+  operational_availability: string;
+  artifact_required: boolean;
+  artifact_available: boolean;
+  artifact_count: number;
+  recommended_artifact_id: string | null;
+}
+
+export interface GovernanceProvenanceItem {
+  label: string;
+  value: unknown;
+  source: string;
+}
+
+export interface GovernanceProvenance {
+  items: GovernanceProvenanceItem[];
+  groups: Array<{ title: string; keys: string[] }>;
+  timeline: Array<{ step: string; source: string; value: unknown }>;
+  current_code_commit?: string | null;
+}
+
+export interface GovernanceGate {
+  id: string;
+  metric: string;
+  observed: unknown;
+  operator: string | null;
+  threshold: unknown;
+  mandatory: boolean;
+  passed: boolean | null;
+  status: string;
+  source: string;
+  evidence?: unknown;
+}
+
+export interface GovernanceModelEvidence {
+  model: ModelName;
+  label: string;
+  status_label: string;
+  role: string;
+  source_kind: string | null;
+  source_identifier: string | null;
+  latest_execution_status: string | null;
+  artifact_id: string | null;
+  has_evidence: boolean;
+  quality_gates: GovernanceGate[];
+  privacy: {
+    diversity_memorization: GovernanceIndicator[];
+    status: string;
+  };
+  income: {
+    indicators: GovernanceIndicator[];
+    status: string;
+  };
+}
+
 export interface GovernanceSnapshot {
+  governance_decision: GovernanceDecision;
+  available_strategies: GovernanceStrategy[];
+  provenance: GovernanceProvenance;
+  quality_gates: GovernanceGate[];
+  evidence_by_model: {
+    default_model: ModelName;
+    models: GovernanceModelEvidence[];
+  };
   operational: {
     metrics: GovernanceMetric[];
     summary: Record<string, unknown>;

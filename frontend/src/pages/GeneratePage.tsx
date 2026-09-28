@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Download, Loader2, RefreshCw } from "lucide-react";
+import { BrainCircuit, CheckCircle2, Database, Download, FileText, FlaskConical, Loader2, RefreshCw } from "lucide-react";
 
 import {
   createGeneration,
@@ -17,8 +17,10 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Callout } from "../components/ui/Callout";
 import { Card, SectionHeader } from "../components/ui/Card";
+import { isTechnicalValue, TechnicalValue } from "../components/ui/TechnicalValue";
 import type { GenerationStatusResponse, ModelArtifact, ModelName, OutputFormat } from "../types/api";
 import { formatBytes, formatNumber, safeFilename } from "../utils/format";
+import { modelDisplayName, statusDisplayName } from "../utils/labels";
 
 interface GeneratePageProps {
   sessionId: string;
@@ -153,13 +155,12 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <header>
+    <div className="mx-auto max-w-7xl space-y-7">
+      <header className="max-w-4xl">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blueAction">Gerar dados</p>
-        <h1 className="mt-2 text-3xl font-bold text-slateInk">Gerador de perfis sintéticos brasileiros</h1>
+        <h1 className="mt-2 text-3xl font-bold text-slateInk">Gerar Dados Sintéticos</h1>
         <p className="mt-2 max-w-3xl text-base leading-7 text-slate-600">
-          Escolha o modelo, o volume, as colunas e o formato. A aplicação mantém internamente o schema completo e
-          usa o serviço de geração do projeto para validar e exportar o dataset.
+          Configure o modelo, selecione os campos e gere uma base sintética pronta para uso.
         </p>
       </header>
 
@@ -184,24 +185,29 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
           {modelOrder.map((modelName) => {
             const model = modelMap.get(modelName);
             const active = selectedModel === modelName;
+            const Icon = modelName === "programmatic" ? Database : modelName === "ctgan" ? BrainCircuit : FlaskConical;
+            const badge = generationModelBadge(modelName, Boolean(model?.recommended_artifact));
             return (
               <button
                 key={modelName}
                 type="button"
                 onClick={() => setSelectedModel(modelName)}
-                className={`rounded-xl border bg-white p-4 text-left shadow-card transition hover:border-navy ${
-                  active ? "border-navy ring-2 ring-blue-100" : "border-borderSoft"
+                className={`relative min-w-0 rounded-xl border p-4 text-left shadow-card transition hover:border-navy focus:outline-none focus:ring-2 focus:ring-blue-200 ${
+                  active ? "border-navy bg-blue-50/60 ring-2 ring-blue-100" : "border-borderSoft bg-white"
                 }`}
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-bold text-slateInk">{model?.label ?? modelName}</h3>
-                  {model?.recommended ? <Badge tone="recommended">Recomendado</Badge> : null}
-                  {model?.experimental ? <Badge tone="experimental">Experimental</Badge> : null}
+                {active ? <span className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-blueAction" aria-hidden="true" /> : null}
+                <div className="flex items-start justify-between gap-3">
+                  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blueAction">
+                    <Icon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <Badge tone={badge.tone}>{badge.label}</Badge>
                   {!model?.available ? <Badge tone="warning">Indisponível</Badge> : null}
                 </div>
+                <h3 className="mt-4 text-lg font-bold text-slateInk">{model?.label ?? modelName}</h3>
                 <p className="mt-3 text-sm leading-6 text-slate-600">{model?.short_description ?? "Carregando..."}</p>
                 <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Limite operacional: {formatNumber(model?.row_limit)} registros
+                  Limite Operacional: {formatNumber(model?.row_limit)} registros
                 </p>
               </button>
             );
@@ -213,9 +219,26 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
           </div>
         ) : null}
         {selectedModel !== "programmatic" ? (
-          <Card className="mt-4">
-            <label className="block text-sm font-bold text-slateInk" htmlFor="artifact-select">
-              Artefato do modelo
+          <Card className="mt-4 border-blue-100">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {selectedArtifact?.recommended_for_neural_generation ? "Artefato Recomendado" : "Artefato Selecionado"}
+                </p>
+                <h3 className="mt-1 text-lg font-bold text-slateInk">
+                  {selectedModelEntry?.title ?? modelDisplayName(selectedModel)} · Renda v{selectedArtifact?.income_model_version ?? "?"} · Geografia v
+                  {selectedArtifact?.geography_model_version ?? "?"}
+                </h3>
+                {selectedArtifact ? (
+                  <div className="mt-2">
+                    <TechnicalValue value={selectedArtifact.artifact_id} />
+                  </div>
+                ) : null}
+              </div>
+              {selectedArtifact ? <Badge tone={statusDisplayName(selectedArtifact.status) === "Aprovado" ? "approved" : "candidate"}>{statusDisplayName(selectedArtifact.status)}</Badge> : null}
+            </div>
+            <label className="mt-4 block text-sm font-bold text-slateInk" htmlFor="artifact-select">
+              Alterar Artefato
             </label>
             <select
               id="artifact-select"
@@ -232,7 +255,6 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
             </select>
             {selectedArtifact ? (
               <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                <Badge tone={selectedArtifact.status === "Aprovado" ? "approved" : "candidate"}>{selectedArtifact.status}</Badge>
                 <Badge>Vocabulário v{selectedArtifact.categorical_vocabulary_version}</Badge>
                 <Badge>Renda v{selectedArtifact.income_model_version}</Badge>
                 <Badge>Geografia v{selectedArtifact.geography_model_version}</Badge>
@@ -244,14 +266,15 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
       </section>
 
       <section>
-        <SectionHeader step={2} title="Volume e reprodutibilidade">
+        <SectionHeader step={2} title="Configuração">
           A seed ajuda a reproduzir a geração. Backends neurais podem variar conforme hardware e bibliotecas.
         </SectionHeader>
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <label className="block text-sm font-bold text-slateInk" htmlFor="rows">
-              Quantidade de registros
+              Quantidade de Registros
             </label>
+            <p className="mt-1 text-xs text-slate-500">Mínimo de 1 e máximo operacional do modelo selecionado.</p>
             <input
               id="rows"
               type="number"
@@ -266,6 +289,7 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
             <label className="block text-sm font-bold text-slateInk" htmlFor="seed">
               Seed
             </label>
+            <p className="mt-1 text-xs text-slate-500">Controla a reprodutibilidade sempre que o backend permitir.</p>
             <input
               id="seed"
               type="number"
@@ -283,38 +307,50 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
           As dependências necessárias são geradas internamente, mas somente as colunas selecionadas são exportadas.
         </SectionHeader>
         <Card>
-          <div className="flex gap-3">
-            <Button variant={columnMode === "preset" ? "primary" : "secondary"} onClick={() => setColumnMode("preset")}>
-              Preset
-            </Button>
-            <Button variant={columnMode === "custom" ? "primary" : "secondary"} onClick={() => setColumnMode("custom")}>
+          <div className="flex flex-wrap gap-2">
+            {columns.data?.presets.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => {
+                  setColumnMode("preset");
+                  setPreset(item.name);
+                }}
+                className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                  columnMode === "preset" && preset === item.name ? "border-navy bg-navy text-white" : "border-borderSoft bg-white text-slateInk hover:border-blueAction"
+                }`}
+              >
+                {presetLabel(item.name)}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setColumnMode("custom")}
+              className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                columnMode === "custom" ? "border-navy bg-navy text-white" : "border-borderSoft bg-white text-slateInk hover:border-blueAction"
+              }`}
+            >
               Personalizado
-            </Button>
+            </button>
           </div>
           {columnMode === "preset" ? (
-            <div className="mt-4">
-              <label className="block text-sm font-bold text-slateInk" htmlFor="preset">
-                Preset
-              </label>
-              <select
-                id="preset"
-                value={preset}
-                onChange={(event) => setPreset(event.target.value)}
-                className="mt-2 w-full rounded-lg border border-slate-500 bg-[#E8EEF7] px-3 py-2 text-sm text-slateInk focus:border-navy focus:outline-none focus:ring-2 focus:ring-blue-200"
-              >
-                {columns.data?.presets.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name} — {item.columns.length} colunas
-                  </option>
-                ))}
-              </select>
-            </div>
+            <p className="mt-4 text-sm text-slate-600">
+              Preset Selecionado: <strong>{presetLabel(preset)}</strong> · {formatNumber(selectedColumns.length)} colunas.
+            </p>
           ) : (
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {columns.data?.groups.map((group) => (
-                <fieldset key={group} className="rounded-lg border border-borderSoft bg-panel p-4">
-                  <legend className="px-1 text-sm font-bold text-slateInk">{group}</legend>
-                  <div className="mt-2 space-y-2">
+            <div className="mt-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slateInk">{customColumns.length} de {columns.data?.final_columns.length ?? 0} campos selecionados</p>
+                <div className="flex gap-2">
+                  <Button variant="secondary" onClick={() => setCustomColumns(columns.data?.final_columns ?? [])}>Selecionar Todos</Button>
+                  <Button variant="ghost" onClick={() => setCustomColumns([])}>Limpar Seleção</Button>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {columns.data?.groups.map((group) => (
+                  <fieldset key={group} className="rounded-lg border border-borderSoft bg-panel p-4">
+                    <legend className="px-1 text-sm font-bold text-slateInk">{group}</legend>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 md:grid-cols-1 xl:grid-cols-2">
                     {columns.data.columns
                       .filter((column) => column.group === group)
                       .map((column) => (
@@ -337,9 +373,10 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
                           </span>
                         </label>
                       ))}
-                  </div>
-                </fieldset>
-              ))}
+                    </div>
+                  </fieldset>
+                ))}
+              </div>
             </div>
           )}
         </Card>
@@ -355,8 +392,8 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
               key={item.value}
               type="button"
               onClick={() => setFormat(item.value)}
-              className={`rounded-xl border bg-white p-4 text-left shadow-card transition hover:border-navy ${
-                format === item.value ? "border-navy ring-2 ring-blue-100" : "border-borderSoft"
+              className={`rounded-xl border p-4 text-left shadow-card transition hover:border-navy ${
+                format === item.value ? "border-navy bg-blue-50/60 ring-2 ring-blue-100" : "border-borderSoft bg-white"
               }`}
             >
               <h3 className="font-bold text-slateInk">{item.label}</h3>
@@ -372,8 +409,10 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
         </SectionHeader>
         <Card>
           <div className="grid gap-4 text-sm md:grid-cols-4">
-            <Summary label="Modelo" value={selectedModel} />
+            <Summary label="Modelo" value={modelDisplayName(selectedModel)} />
+            <Summary label="Artefato" value={selectedArtifact?.artifact_id ?? "Geração direta"} />
             <Summary label="Registros" value={formatNumber(rows)} />
+            <Summary label="Seed" value={formatNumber(seed)} />
             <Summary label="Colunas exportadas" value={formatNumber(selectedColumns.length)} />
             <Summary label="Formato" value={format.toUpperCase()} />
           </div>
@@ -387,9 +426,15 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Gerar dados sintéticos
+              Gerar Dados Sintéticos
             </Button>
             {!canGenerate ? <span className="text-sm text-orange-800">Revise modelo, artefato e colunas selecionadas.</span> : null}
+            {startGeneration.isPending || status.data?.status === "running" || status.data?.status === "queued" ? (
+              <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Gerando Dados Sintéticos...
+              </span>
+            ) : null}
           </div>
           {startGeneration.error ? <p className="mt-3 text-sm text-red-700">{startGeneration.error.message}</p> : null}
         </Card>
@@ -410,10 +455,13 @@ export function GeneratePage({ sessionId }: GeneratePageProps) {
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
+  const technical = isTechnicalValue(label, value);
   return (
-    <div className="rounded-lg bg-panel p-3">
+    <div className="min-w-0 rounded-lg border border-borderSoft bg-panel p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 font-bold text-slateInk">{value}</p>
+      <div className="mt-1 min-w-0 font-bold text-slateInk">
+        {technical ? <TechnicalValue value={value} /> : <span className="break-words">{value}</span>}
+      </div>
     </div>
   );
 }
@@ -438,8 +486,8 @@ function ResultPanel({
     <Card className="border-blue-200">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slateInk">Resultado da geração</h2>
-          <p className="text-sm text-slate-600">Status: {generation.status}</p>
+          <h2 className="text-xl font-bold text-slateInk">{completed ? "Dados Gerados com Sucesso" : "Resultado da Geração"}</h2>
+          <p className="text-sm text-slate-600">Status: {statusDisplayName(generation.status)}</p>
         </div>
         {completed ? (
           <Badge tone="approved">
@@ -453,17 +501,21 @@ function ResultPanel({
         )}
       </div>
       {generation.error ? <p className="mt-4 text-sm text-red-700">{generation.error.message}</p> : null}
-      <div className="mt-5 grid gap-4 text-sm md:grid-cols-4">
-        <Summary label="Modelo" value={generation.model} />
-        <Summary label="Artefato" value={selectedArtifact?.status ?? "Geração direta"} />
+      <div className="mt-5 grid gap-4 text-sm md:grid-cols-3 xl:grid-cols-6">
+        <Summary label="Modelo" value={modelDisplayName(generation.model)} />
+        <Summary label="Artefato" value={selectedArtifact?.artifact_id ?? "Geração direta"} />
         <Summary label="Registros" value={formatNumber(generation.num_rows)} />
+        <Summary label="Colunas" value={formatNumber(generation.exported_columns.length)} />
+        <Summary label="Formato" value={generation.output_format.toUpperCase()} />
+        <Summary label="Validação" value={generation.validation ? "Concluída" : "Em andamento"} />
         <Summary label="Duração" value={generation.duration_seconds ? `${generation.duration_seconds.toFixed(2)} s` : "Em andamento"} />
       </div>
       {preview ? (
-        <div className="mt-6 overflow-x-auto">
-          <h3 className="mb-3 font-bold text-slateInk">Amostra</h3>
+        <div className="mt-6">
+          <h3 className="mb-3 font-bold text-slateInk">Preview</h3>
+          <div className="overflow-x-auto rounded-xl border border-borderSoft">
           <table className="min-w-full border-collapse text-left text-sm">
-            <thead>
+            <thead className="sticky top-0">
               <tr className="bg-slate-200 text-slateInk">
                 {preview.columns.map((column) => (
                   <th key={column} className="border border-borderSoft px-3 py-2">
@@ -484,21 +536,39 @@ function ResultPanel({
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : null}
       {completed ? (
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Button onClick={onDownloadDataset}>
+        <div className="mt-6 grid gap-3 sm:inline-grid sm:grid-cols-2">
+          <Button onClick={onDownloadDataset} className="w-full">
             <Download className="h-4 w-4" />
-            Baixar dataset
+            Baixar Dados
           </Button>
-          <Button variant="secondary" onClick={onDownloadManifest}>
-            <Download className="h-4 w-4" />
-            Baixar manifesto
+          <Button variant="secondary" onClick={onDownloadManifest} className="w-full">
+            <FileText className="h-4 w-4" />
+            Baixar Manifesto
           </Button>
         </div>
       ) : null}
       {downloadError ? <p className="mt-3 text-sm text-red-700">{downloadError}</p> : null}
     </Card>
   );
+}
+
+function generationModelBadge(model: ModelName, hasRecommendedArtifact: boolean): { label: string; tone: "approved" | "recommended" | "experimental" | "neutral" } {
+  if (model === "programmatic") return { label: "Padrão Geral", tone: "recommended" };
+  if (model === "simple_gan") return { label: "Experimental", tone: "experimental" };
+  return hasRecommendedArtifact ? { label: "Recomendado", tone: "approved" } : { label: "Artefato Neural", tone: "neutral" };
+}
+
+function presetLabel(name: string): string {
+  const labels: Record<string, string> = {
+    completo: "Completo",
+    demografico: "Demográfico",
+    contato: "Contato",
+    documentos: "Documentos",
+    minimo: "Mínimo"
+  };
+  return labels[name] ?? name;
 }
