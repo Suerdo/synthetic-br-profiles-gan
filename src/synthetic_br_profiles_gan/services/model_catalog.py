@@ -1,4 +1,4 @@
-"""Catálogo estruturado dos modelos disponíveis para UI e API."""
+"""Catálogo estruturado dos modelos disponíveis para API, React e documentação."""
 
 from __future__ import annotations
 

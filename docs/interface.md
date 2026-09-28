@@ -1,93 +1,80 @@
-# Interface Streamlit
+# Interface Web
 
-A interface Streamlit é a camada visual da plataforma. Ela reutiliza `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação e manifestos. A aplicação não implementa regras próprias de geração de CPF, documentos, pós-processamento, validação ou serialização.
+A interface oficial do projeto é composta por React + TypeScript + Vite no frontend e FastAPI no backend. A interface é apenas uma camada de apresentação: ela monta solicitações, acompanha jobs assíncronos e exibe resultados, enquanto geração, validação, seleção de colunas, carregamento de modelos, manifestos e governança permanecem nos serviços Python reutilizáveis.
+
+Fluxo arquitetural:
+
+```text
+React
+  → FastAPI
+  → services
+  → models / pipeline / evaluation / artifacts
+```
 
 ## Instalação
 
-A dependência da interface é opcional:
+Instale o pacote Python com a API:
 
 ```bash
-pip install -e ".[ui]"
+pip install -e ".[api]"
 ```
 
-A instalação básica continua disponível sem Streamlit:
+Instale as dependências do frontend:
 
 ```bash
-pip install -e .
+cd frontend
+npm install
 ```
 
-## Inicialização
+## Execução Local
 
-Execute:
+Use dois processos durante o desenvolvimento local.
+
+Backend:
 
 ```bash
-streamlit run app/streamlit_app.py
+python -m uvicorn synthetic_br_profiles_gan.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-O ponto de entrada fica em `app/streamlit_app.py`. Os componentes reutilizáveis ficam em `src/synthetic_br_profiles_gan/ui/`.
+Frontend:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Acesse:
+
+```text
+http://localhost:5173
+```
+
+Para gerar o build estático:
+
+```bash
+cd frontend
+npm run build
+```
 
 ## Configuração
 
-A configuração fica em `configs/ui.yaml`. Ela define título, subtítulo, diretórios administrados, limites operacionais da interface, seed padrão, formato padrão, artefatos neurais aprovados, caminho da auditoria e data de revisão do conteúdo regulatório.
+A configuração operacional da API fica em `configs/api.yaml`. Ela define título, diretórios administrados, limites interativos por modelo, defaults de geração, raiz de artefatos neurais e caminho de auditoria.
 
-Os limites de linhas são operacionais para uso interativo. Eles não representam a capacidade máxima absoluta dos modelos e não devem ser confundidos com benchmarks de capacidade.
+Os limites de linhas são operacionais para uso interativo. Eles não representam capacidade máxima absoluta dos modelos e não substituem benchmarks de capacidade.
 
 ## Navegação
 
-A aplicação possui três áreas:
+A aplicação possui três páginas:
 
-- `Gerar dados`: formulário principal de geração.
-- `Modelos`: explicação didática e técnica dos três sintetizadores.
-- `Governança`: histórico, indicadores, quality gates, auditoria sanitizada e glossário de interpretação.
-
-`Gerar dados` é a página inicial. A navegação usa menu lateral com fundo azul-marinho, item ativo destacado e a marca visual `Dados Sintéticos Brasileiro`. A sidebar termina após os itens de navegação, sem rodapé informativo.
-
-Títulos e subtítulos estruturais usam capitalização com iniciais maiúsculas nas palavras principais, como `Resumo Operacional`, `Qualidade dos Dados`, `Execuções Recentes`, `Resumo Simples` e `Resumo Técnico`. Labels funcionais de formulário podem permanecer em frase natural, como `Quantidade de registros`.
+- `Gerar Dados`: formulário principal de geração;
+- `Modelos`: apresentação dos três sintetizadores e dos artefatos válidos;
+- `Governança`: evidências, quality gates, privacidade, diversidade, realismo condicional, execuções recentes, auditoria e glossário.
 
 ## Geração
 
-A tela `Gerar dados` organiza o fluxo em seis etapas:
+A página `Gerar Dados` permite escolher modelo, quantidade de registros, seed, formato e colunas exportadas. O modelo `programmatic` gera diretamente. `ctgan` e `simple_gan` usam apenas `artifact_id` de artefatos válidos listados pelo `ModelRegistry`; o usuário não informa `model_path`, `output_path` nem caminhos arbitrários.
 
-1. Escolha do modelo.
-2. Volume e Reprodutibilidade.
-3. Seleção de colunas.
-4. Formato de saída.
-5. Revisão antes da execução.
-6. Execução e downloads.
-
-Ao clicar em `Gerar dados sintéticos`, a interface cria um diretório exclusivo, constrói um `UIGenerationRequest` e chama o serviço de geração. O Streamlit não duplica lógica de negócio.
-
-## Modelos e artefatos
-
-O modelo `programmatic` fica sempre disponível e não exige treinamento.
-
-`ctgan` e `simple_gan` ficam disponíveis na tela de geração quando há artefatos tecnicamente válidos no diretório administrado. Um artefato aparece quando o manifesto pode ser lido, o tipo de modelo é reconhecido, os arquivos obrigatórios existem, o schema é compatível e o diretório permanece dentro de `artifacts/models`.
-
-A ausência de status `approved` não bloqueia automaticamente a exibição. Em vez disso, a interface mostra a finalidade do artefato:
-
-- `Aprovado`;
-- `Candidato`;
-- `Experimental`;
-- `Smoke`;
-- `Legado`;
-- `Sem classificação`.
-
-Ao selecionar `ctgan` ou `simple_gan`, o artefato mais recente do modelo é pré-selecionado por `created_at_utc` do manifesto. Quando não houver data temporal no manifesto, a aplicação usa metadados temporais disponíveis e, por último, uma data segura do arquivo. O badge `Mais recente` indica apenas recência, não melhor qualidade nem aprovação.
-
-A interface não permite upload de `.pkl`, `.keras`, `.json` ou outros artefatos de modelo. Também não permite que o usuário informe caminhos arbitrários. Modelos serializados devem ser produzidos ou previamente aprovados pela própria aplicação.
-
-Avisos por finalidade:
-
-- `Smoke`: treinado apenas para validação técnica e não representa modelo de produção.
-- `Experimental`: finalidade experimental; métricas devem ser avaliadas antes de uso crítico.
-- `Legado`: treinado com versão anterior do vocabulário; a saída será normalizada, mas pode apresentar menor diversidade de ocupações.
-- `Candidato`: artefato em avaliação, ainda não definido como modelo neural padrão.
-
-## Seleção de colunas
-
-Os três modelos continuam gerando internamente as 11 colunas-base. O pós-processamento produz as 18 colunas finais e a validação estrutural é executada sobre o schema completo.
-
-A seleção escolhida pelo usuário é aplicada somente depois da validação:
+A seleção de colunas é aplicada somente depois da geração interna das 18 colunas finais e da validação estrutural completa:
 
 ```text
 geração interna das 18 colunas
@@ -96,104 +83,58 @@ geração interna das 18 colunas
   → exportação
 ```
 
-No modo `Preset`, a interface usa os presets existentes em `column_catalog.py`: `completo`, `demografico`, `contato`, `documentos` e `minimo`.
+Formatos suportados:
 
-No modo personalizado, as colunas são agrupadas em `Identificação sintética`, `Demografia`, `Localização e contato` e `Perfil socioeconômico`. Dependências internas continuam sendo geradas para preservar a coerência dos perfis, mas não são adicionadas automaticamente ao arquivo exportado.
+- `csv`: `utf-8-sig`, sem índice e com separador `;`;
+- `json`: lista de objetos UTF-8 com `ensure_ascii=False`;
+- `parquet`: preservação de tipos sempre que possível.
 
-## Formatos e downloads
+Após a conclusão, a interface mostra resumo, preview limitado, validação, colunas exportadas e downloads de dataset e manifesto.
 
-Formatos disponíveis:
+## Sessão Efêmera
 
-- `csv`: gravado em `utf-8-sig`, sem índice e com separador `;`;
-- `json`: lista de objetos em UTF-8 com `ensure_ascii=False`;
-- `parquet`: preserva tipos sempre que possível.
+O React cria um UUID em memória e o envia em `X-UI-Session-ID`. Esse identificador não é persistido em `localStorage`, `sessionStorage` ou cookie.
 
-Após a geração, a interface apresenta resumo, amostra limitada por `preview_rows`, colunas exportadas, validação estrutural e botões para baixar o dataset e o manifesto.
+Cada geração usa:
 
-Os botões de download são apresentados lado a lado, com largura visual semelhante e próximos entre si para reduzir deslocamento visual.
+```text
+artifacts/web_sessions/<ui-session-id>/<generation-id>/
+```
 
-## Campos do formulário
+Recarregar a página cria uma nova sessão visual. Gerações anteriores continuam nos artefatos locais, mas a interface não recupera downloads de sessões antigas nesta versão.
 
-Os campos de configuração da geração usam primeiro o tema oficial do Streamlit, definido em `.streamlit/config.toml`. A opção `secondaryBackgroundColor = "#E8EEF7"` dá aos widgets um fundo azul-acinzentado claro, `borderColor = "#64748B"` define a borda visível e `showWidgetBorder = true` mantém a borda mesmo sem foco. A cor `primaryColor = "#1E3A8A"` orienta o foco e elementos selecionados.
+## Modelos
 
-Os `number_input`, como `Quantidade de registros` e `Seed`, devem aparecer como caixas delimitadas, com steppers visíveis. Os `selectbox`, como `Preset`, `Formato`, `Tipo`, `Modelo` e `Status`, usam fundo e borda do tema, mantendo seta de dropdown contrastada e área clicável confortável.
+Papéis operacionais:
 
-O CSS interno da interface é usado para layout, sidebar, cards, seções e destaques. Ele não redefine genericamente `input`, `selectbox`, `multiselect` ou elementos internos BaseWeb. Qualquer CSS adicional para widgets deve ser tratado como fallback restrito e documentado.
+- `programmatic`: padrão geral, rápido, controlado e adequado a grandes volumes locais;
+- `ctgan`: modelo neural recomendado quando o artefato aprovado está instalado localmente;
+- `simple_gan`: baseline acadêmico experimental.
+
+Artefatos neurais aparecem quando o manifesto pode ser lido, o modelo é reconhecido, os arquivos obrigatórios existem, o schema é compatível ou possui tratamento de compatibilidade, e o diretório está dentro da raiz administrada por `artifacts/models`.
+
+`artifacts/` não é distribuído pelo Git. A CTGAN aprovada e a GAN simples dependem de artefatos locais; o programático não depende de artefato neural.
+
+## Segurança
+
+A API não oferece upload de modelos, upload de datasets, treinamento HTTP nem seleção por caminho local. Modelos serializados com `pickle`, Keras ou formatos equivalentes devem ser produzidos ou aprovados pela própria aplicação.
+
+As respostas são sanitizadas: não expõem hostname, usuário local, IP, user agent, caminhos absolutos, detalhes de hardware, variáveis de ambiente, caminhos CUDA, stack traces completos, datasets brutos ou valores individuais gerados.
 
 ## Auditoria
 
-A interface registra eventos sanitizados em:
+Eventos sanitizados são registrados em:
 
 ```text
-artifacts/ui_audit/events.jsonl
+artifacts/web_audit/events.jsonl
 ```
 
-Eventos registrados incluem `session_started`, `page_viewed`, `model_selected`, `generation_requested`, `generation_succeeded`, `generation_failed`, `dataset_download_requested` e `manifest_download_requested`.
+Eventos não incluem CPF, nomes, telefone, linhas geradas, datasets, IP, user agent, identidade de usuário ou traceback completo. Falhas de auditoria não invalidam uma geração.
 
-A auditoria não registra linhas geradas, CPF, nomes, telefones, datasets, traceback completo, IP, user agent ou identidade de usuário. Falhas de escrita da auditoria não invalidam uma geração.
+## Treinamento e Benchmarking
 
-## Diretórios temporários
+Treinamento e benchmarking permanecem operações administrativas via CLI. Esta versão não possui endpoint HTTP público para treinamento, benchmark de capacidade, retreinamento neural ou promoção automática de artefatos.
 
-Cada geração usa um diretório exclusivo em:
+## Histórico da Migração
 
-```text
-artifacts/ui_sessions/<session-id>/<generation-id>/
-```
-
-Esta primeira versão não implementa histórico persistente nem limpeza automática. A equipe responsável deve definir uma política de retenção e remoção desses arquivos em ambiente institucional.
-
-## Governança
-
-A página de governança lê evidências reais de manifestos e eventos locais. Quando não houver dado suficiente, exibe `Não disponível`, `Não avaliado` ou `Sem execução registrada`. Cada bloco informa a origem esperada, como `manifesto de execução`, `validation.json`, `quality_gates.json`, `evaluation.json` ou `generation.json`.
-
-A página foi simplificada para concentrar `Resumo Operacional`, `Modelo Neural Recomendado`, `Qualidade dos Dados`, `Privacidade`, `Execuções Recentes`, `Auditoria` e `Como interpretar os indicadores`. As seções principais usam containers com borda, fundo claro, padding consistente e títulos no topo. O histórico visual de artefatos e a matriz regulatória não fazem parte dessa tela. Consulte `docs/governance.md` para o glossário operacional e `docs/compliance.md` para referências regulatórias.
-
-## Artefato neural recomendado
-
-A CTGAN aprovada é selecionada pelo `ModelRegistry` por uma regra explícita: primeiro artefatos `approved` com `recommended_for_neural_generation = true`, depois outros aprovados, candidatos recomendados e candidatos. Artefatos `smoke`, `experimental` e `legacy` continuam visíveis quando tecnicamente válidos, mas não são pré-selecionados como recomendados.
-
-O artefato `artifacts/models/ctgan/20260730T123208Z-income-v3-geo-v2-approved/` é o artefato neural recomendado. Ele usa vocabulário v2, renda v3 e geografia v2. O modelo programático permanece como padrão geral da plataforma; a CTGAN aprovada é recomendada para geração neural avaliada; a GAN simples permanece experimental.
-
-A aprovação é técnica e interna. Ela não é certificação externa, não garante anonimização e não representa validação populacional oficial.
-
-## Limitações
-
-- Não há treinamento pela interface nesta fase.
-- Não há upload de modelos ou datasets.
-- Não há autenticação, banco de dados, histórico persistente, filas ou geração assíncrona.
-- A interface não executa benchmarks de capacidade.
-- Modelos neurais podem variar conforme backend, hardware e versões das bibliotecas.
-- A referência metodológica continua sendo a base de calibração sintética controlada.
-## Indicadores de diversidade e renda
-
-A interface apresenta métricas de duplicidade de combinações-base, correspondência exata com treino, correspondência exata com holdout e realismo condicional da renda na página `Governança`.
-
-Quando uma execução foi criada antes dessas métricas, o valor aparece como `Não avaliado`. Zero é exibido somente quando o artefato registra zero real.
-
-Esses indicadores usam as colunas-base do modelo e excluem identificadores derivados. Eles apoiam avaliação de risco e qualidade, mas não garantem anonimização nem conformidade regulatória.
-
-## Interface React experimental
-
-A interface React + TypeScript + Vite foi adicionada sem remover a interface Streamlit. O React usa uma API FastAPI opcional, documentada em `docs/api.md`, e continua reutilizando `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação e manifestos.
-
-A navegação React possui três páginas: `Gerar dados`, `Modelos` e `Governança`. A página inicial é `Gerar dados`.
-
-A API não aceita caminhos arbitrários de modelo ou saída. Modelos neurais são selecionados por `artifact_id` entre os artefatos válidos listados pelo `ModelRegistry`; o cliente não envia `model_path`. Cada geração recebe um `X-UI-Session-ID` efêmero criado em memória pelo React e os arquivos são gravados em `artifacts/web_sessions/<ui-session-id>/<generation-id>/`.
-
-As páginas React `Modelos` e `Governança` consomem endpoints próprios da API. `Modelos` apresenta os três sintetizadores, artefatos válidos, artefato recomendado e métricas disponíveis sem expor caminhos locais. `Governança` apresenta resumo operacional, qualidade, privacidade, diversidade, realismo condicional, histórico filtrável, auditoria sanitizada e glossário. Valores ausentes permanecem como `Não avaliado` na interface.
-
-Os serviços de histórico, governança e auditoria foram movidos para `synthetic_br_profiles_gan.services` para uso compartilhado por FastAPI e Streamlit. Os módulos em `synthetic_br_profiles_gan.ui.services` permanecem como wrappers de compatibilidade para a interface Streamlit.
-
-Essa fase não implementa treinamento pela interface, upload de modelos, histórico persistente, autenticação, banco de dados ou filas externas. A documentação operacional da nova interface está em `docs/react-frontend.md`.
-
-### Governança no React
-
-A página `Governança` do React foi refinada para responder quatro perguntas: o que foi avaliado, com qual artefato, quais critérios foram atendidos e quais ressalvas permanecem. A página segue a cadeia:
-
-```text
-configuração → geração → validação → avaliação → evidências → decisão → artefato → rastreabilidade
-```
-
-A decisão separa `evaluation_status`, `recommendation_status`, `general_default` e `production_status`. Portanto, a CTGAN aprovada pode ser recomendada como artefato neural sem substituir o modelo programático como padrão geral e sem ser descrita como produção.
-
-As seções `Trilha de Auditoria` e `Glossário e Metodologia` ficam recolhidas por padrão. A API fornece evidências agregadas e sanitizadas; o React não lê datasets completos nem caminhos locais.
+A interface visual anterior foi removida após validação de paridade funcional. O registro histórico da migração está em `docs/react-streamlit-parity.md`. A documentação operacional atual deve tratar React + FastAPI como a interface oficial.

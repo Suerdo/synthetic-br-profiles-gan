@@ -39,7 +39,7 @@ Uso proibido:
 
 ## Governança da interface
 
-A interface Streamlit possui uma página `Governança` dedicada a consolidar evidências locais. Ela lê manifestos, histórico de modelos, relatórios de validação, quality gates e eventos sanitizados. Quando uma informação não existe, a interface usa explicitamente `Não disponível`, `Não avaliado` ou `Sem execução registrada`.
+A interface React possui uma página `Governança` dedicada a consolidar evidências locais por meio da API FastAPI. Ela lê manifestos, histórico de modelos, relatórios de validação, quality gates e eventos sanitizados. Quando uma informação não existe, a interface usa explicitamente `Não disponível`, `Não avaliado` ou `Sem execução registrada`.
 
 Os indicadores exibidos são evidências operacionais, não certificações. Exemplos:
 
@@ -59,7 +59,7 @@ Cada bloco da página informa a fonte esperada:
 - qualidade dos dados: `validation.json`, `quality_gates.json` e manifesto de execução;
 - privacidade: `evaluation.json` e métricas de privacidade disponíveis;
 - execuções recentes: manifestos de execução, benchmark, treinamento e geração da interface;
-- auditoria: `artifacts/ui_audit/events.jsonl`.
+- auditoria: `artifacts/web_audit/events.jsonl`.
 
 Ausência de métrica não é exibida como zero. A interface usa `Não avaliado` e informa que a execução não produziu aquela métrica. Zero é reservado para valores reais registrados como zero.
 
@@ -77,7 +77,7 @@ GET /api/governance/executions
 GET /api/governance/audit
 ```
 
-Esses endpoints reutilizam os serviços compartilhados em `synthetic_br_profiles_gan.services` e não dependem de Streamlit. As respostas são agregadas e sanitizadas: não incluem hostname, usuário local, caminhos absolutos, IP, user agent, variáveis de ambiente, caminhos CUDA, stack traces ou valores individuais gerados.
+Esses endpoints reutilizam os serviços compartilhados em `synthetic_br_profiles_gan.services`. As respostas são agregadas e sanitizadas: não incluem hostname, usuário local, caminhos absolutos, IP, user agent, variáveis de ambiente, caminhos CUDA, stack traces ou valores individuais gerados.
 
 Campos que não existem nos artefatos históricos permanecem como `null` no contrato HTTP. O frontend React converte esses valores para `Não avaliado` e mantém a origem da informação visível para evitar confundir ausência de evidência com valor zero.
 
@@ -114,7 +114,7 @@ Campos que não existem nos artefatos históricos permanecem como `null` no cont
 Eventos da interface são registrados em:
 
 ```text
-artifacts/ui_audit/events.jsonl
+artifacts/web_audit/events.jsonl
 ```
 
 Eventos previstos:

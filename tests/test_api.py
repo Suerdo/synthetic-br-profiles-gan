@@ -111,6 +111,26 @@ class ApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_generation_failure_status_does_not_expose_traceback(self) -> None:
+        def fail_generation(request):
+            raise RuntimeError("erro interno privado")
+
+        with patch("synthetic_br_profiles_gan.api.jobs.run_generation", side_effect=fail_generation):
+            response = self.client.post(
+                "/api/generations",
+                headers={"X-UI-Session-ID": self.session_id},
+                json={"model": "programmatic", "num_rows": 2, "output_format": "csv", "seed": 41},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        generation_id = response.json()["generation_id"]
+        payload = self._wait_for_completion(generation_id)
+        self.assertEqual(payload["status"], "failed")
+        dumped = json.dumps(payload, ensure_ascii=False).lower()
+        self.assertIn("runtimeerror", dumped)
+        self.assertNotIn("traceback", dumped)
+        self.assertNotIn("erro interno privado", dumped)
+
     def test_model_artifacts_expose_ids_not_paths(self) -> None:
         artifact_dir = _write_fake_ctgan_artifact(self.settings.models_root / "ctgan" / "approved")
         response = self.client.get("/api/models/ctgan/artifacts")

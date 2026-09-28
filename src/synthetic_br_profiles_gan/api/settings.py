@@ -1,4 +1,4 @@
-"""Configuração da API HTTP sem dependência da camada de UI."""
+"""Configuração da API HTTP usada pelo frontend React."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class ApiSettings:
     models_root: Path = Path("artifacts/models")
     web_sessions_root: Path = Path("artifacts/web_sessions")
     artifacts_root: Path = Path("artifacts")
-    audit_events_path: Path = Path("artifacts/ui_audit/events.jsonl")
+    audit_events_path: Path = Path("artifacts/web_audit/events.jsonl")
     default_rows: int = 1000
     min_rows: int = 1
     row_limits: dict[str, int] = field(
@@ -40,8 +40,8 @@ class ApiSettings:
     max_workers: int = 1
 
 
-def load_api_settings(path: str | Path = "configs/ui.yaml") -> ApiSettings:
-    """Carrega a configuração compartilhada com a UI sem importar módulos Streamlit."""
+def load_api_settings(path: str | Path = "configs/api.yaml") -> ApiSettings:
+    """Carrega a configuração operacional da API."""
     config_path = Path(path)
     if config_path.exists():
         config = load_yaml_config(config_path)
@@ -62,7 +62,7 @@ def load_api_settings(path: str | Path = "configs/ui.yaml") -> ApiSettings:
         models_root=Path(str(application.get("models_root", "artifacts/models"))),
         web_sessions_root=Path(str(application.get("web_sessions_root", application.get("sessions_root", "artifacts/web_sessions")))),
         artifacts_root=Path(str(application.get("artifacts_root", "artifacts"))),
-        audit_events_path=Path(str(audit.get("events_path", "artifacts/ui_audit/events.jsonl"))),
+        audit_events_path=Path(str(audit.get("events_path", "artifacts/web_audit/events.jsonl"))),
         default_rows=_positive_int(generation.get("default_rows", 1000), "generation.default_rows"),
         min_rows=_positive_int(generation.get("min_rows", 1), "generation.min_rows"),
         row_limits={

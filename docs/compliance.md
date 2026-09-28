@@ -10,7 +10,7 @@ Os dados gerados não são consultados nem validados em bases oficiais. A valida
 
 ## Matriz de evidências
 
-A matriz permanece como referência documental em `docs/compliance.md` e não é exibida na página `Governança` da interface Streamlit nesta versão simplificada.
+A matriz permanece como referência documental em `docs/compliance.md` e não é exibida na página `Governança` da interface React nesta versão simplificada.
 
 A referência documental usa uma matriz com os seguintes status:
 
@@ -54,7 +54,7 @@ Quando a ferramenta for usada em projetos que envolvam crianças ou adolescentes
 
 ## Auditoria e rastreabilidade
 
-A interface registra eventos sanitizados em `artifacts/ui_audit/events.jsonl`. Esses eventos não incluem valores individuais gerados, documentos, nomes, telefones, IP, user agent, identidade de usuário ou traceback completo.
+A interface registra eventos sanitizados em `artifacts/web_audit/events.jsonl`. Esses eventos não incluem valores individuais gerados, documentos, nomes, telefones, IP, user agent, identidade de usuário ou traceback completo.
 
 Manifestos de geração registram modelo, seed, formato, colunas exportadas, colunas geradas internamente, validação, ambiente e aviso de governança. Manifestos de treinamento registram versão do vocabulário, schema, dados de configuração, tempos e ambiente.
 

@@ -24,7 +24,7 @@ from synthetic_br_profiles_gan.models.profiles import (
     ctgan_income_v3_geo_v2_candidate_profile,
     ctgan_income_v3_recommended_candidate_profile,
 )
-from synthetic_br_profiles_gan.ui.model_catalog import model_catalog_by_name
+from synthetic_br_profiles_gan.services.model_catalog import model_catalog_by_name
 
 
 class IncomeV3RefinementTest(unittest.TestCase):

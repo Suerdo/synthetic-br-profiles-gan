@@ -2,6 +2,8 @@
 
 A API FastAPI é uma camada fina sobre os serviços existentes do projeto. Ela não implementa regras próprias de geração, validação, presets, carregamento de modelos ou exportação.
 
+A configuração operacional padrão fica em `configs/api.yaml`.
+
 ## Instalação e execução
 
 Instale o extra opcional:
@@ -121,6 +123,8 @@ O contrato HTTP não aceita `model_path` nem `output_path`.
 ### `GET /api/generations/{generation_id}`
 
 Consulta o status da geração da sessão atual. Jobs de outra sessão retornam `404`.
+
+Quando um job falha, a resposta pública inclui apenas tipo de erro e mensagem amigável. Tracebacks e detalhes internos ficam restritos aos logs do servidor.
 
 ### `GET /api/generations/{generation_id}/preview`
 

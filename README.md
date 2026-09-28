@@ -394,35 +394,18 @@ A seleção de colunas altera apenas a projeção exportada. Com a mesma seed, q
 
 O notebook em `notebooks/` importa o pacote e demonstra execução, amostra, validação, métricas e comparação de modelos. Ele não contém mais uma implementação paralela do pipeline.
 
-## Interface Streamlit
+## Interface Web Oficial
 
-A interface Streamlit transforma o núcleo do projeto em uma plataforma visual para geração, governança, IA responsável e consulta de evidências operacionais, sem duplicar as regras de negócio do pacote. Ela reutiliza `GenerationService`, `ModelRegistry`, catálogo de colunas, presets, validação estrutural, exportação, manifestos e auditoria sanitizada.
+A interface oficial do projeto é React + TypeScript + Vite, servida por uma API FastAPI. O núcleo continua em Python. A arquitetura é:
 
-Instalar o extra opcional:
-
-```bash
-pip install -e ".[ui]"
+```text
+React
+  → FastAPI
+  → services
+  → models / pipeline / evaluation / artifacts
 ```
 
-Iniciar a aplicação:
-
-```bash
-streamlit run app/streamlit_app.py
-```
-
-A aplicação possui três áreas: `Gerar dados`, `Modelos` e `Governança`. `Gerar dados` é a página inicial.
-
-A tela de geração permite escolher modelo, quantidade de registros, seed, formato de saída e colunas exportadas. O modelo programático fica disponível diretamente. `ctgan` e `simple_gan` aparecem quando há artefatos tecnicamente válidos em `artifacts/models`, com manifesto legível, modelo reconhecido, arquivos obrigatórios presentes, schema compatível e diretório dentro da raiz administrada.
-
-A seleção de colunas é aplicada somente depois da geração interna das 18 colunas finais e da validação estrutural completa. A interface não permite upload de modelos nem caminhos arbitrários para artefatos serializados. Consulte `docs/interface.md` para detalhes de instalação, telas, governança, diretórios temporários e limitações.
-
-A página de governança lê manifestos, histórico de modelos, validações, quality gates e eventos sanitizados em `artifacts/ui_audit/events.jsonl`. O conteúdo essencial sobre LGPD, ECA Digital e uso seguro foi integrado à governança. Ele é educacional: não constitui parecer jurídico, certificação regulatória, auditoria formal ou garantia de conformidade. Consulte também `docs/governance.md`, `docs/compliance.md` e `docs/design-system.md`.
-
-Ao selecionar `ctgan`, o `ModelRegistry` prioriza explicitamente o artefato `approved` com `recommended_for_neural_generation = true`. Os demais artefatos tecnicamente válidos continuam disponíveis para seleção manual. Recência continua sendo usada apenas como critério secundário dentro do mesmo nível de recomendação; “mais recente” não significa automaticamente melhor qualidade.
-
-## Interface React e API
-
-O projeto também possui uma interface React + TypeScript + Vite, servida separadamente da API FastAPI opcional. A interface Streamlit permanece disponível; esta fase adiciona uma alternativa web desacoplada sem duplicar regras de geração, validação ou governança.
+A interface possui três páginas: `Gerar Dados`, `Modelos` e `Governança`. `Gerar Dados` é a página inicial. O React não duplica regras de geração, validação, seleção de colunas, carregamento de modelos, exportação ou governança.
 
 Instalar a API:
 
@@ -444,13 +427,26 @@ npm install
 npm run dev
 ```
 
+Abra `http://localhost:5173`. Para build:
+
+```bash
+cd frontend
+npm run build
+```
+
+São necessários dois processos no desenvolvimento local: FastAPI e Vite. A configuração operacional fica em `configs/api.yaml`.
+
 A API expõe apenas metadados, artefatos administrados, governança sanitizada e geração assíncrona. O contrato HTTP usa `artifact_id` para modelos neurais e não aceita `model_path` nem `output_path` enviados pelo cliente. Cada geração exige `X-UI-Session-ID`, criado de forma efêmera pelo React e não persistido em storage ou cookie.
 
-As páginas React disponíveis são `Gerar dados`, `Modelos` e `Governança`. A página `Modelos` consome `/api/models`, `/api/models/{model}` e `/api/models/{model}/recommended`. A página `Governança` consome `/api/governance` e os endpoints seccionados para resumo, qualidade, privacidade, renda, execuções e auditoria. Valores ausentes são exibidos como `Não avaliado`, e as respostas não expõem caminhos absolutos, stack traces ou detalhes sensíveis do ambiente local.
+Os arquivos de cada geração são gravados em `artifacts/web_sessions/<ui-session-id>/<generation-id>/`. Recarregar a página inicia uma nova sessão visual; downloads de sessões anteriores não são recuperados automaticamente pela interface.
 
-A página `Governança` do React foi refinada para organizar as evidências como uma narrativa: `configuração → geração → validação → avaliação → evidências → decisão → artefato → rastreabilidade`. Ela separa `evaluation_status`, `recommendation_status`, `general_default` e `production_status`, mostra as três estratégias do projeto mesmo quando um artefato neural está ausente e mantém auditoria e glossário recolhidos por padrão.
+Treinamento e benchmarking permanecem operações administrativas via CLI. Não existe endpoint HTTP público de treinamento nesta versão.
 
-Consulte `docs/api.md` e `docs/react-frontend.md`.
+`artifacts/` não é distribuído pelo Git. A CTGAN aprovada depende de artefato instalado localmente, a GAN simples depende de artefato válido, e o programático não depende de artefato neural.
+
+O React e a API não aceitam upload de modelos, upload de datasets, caminhos arbitrários, `model_path`, `output_path` ou treinamento HTTP. As respostas sanitizadas não expõem hostname, usuário local, IP, user agent, caminhos absolutos, detalhes de hardware, variáveis de ambiente, caminhos CUDA, stack traces completos, datasets brutos ou valores individuais gerados.
+
+Consulte `docs/interface.md`, `docs/api.md` e `docs/react-frontend.md`.
 
 ## Diversidade, memorização e renda condicional
 

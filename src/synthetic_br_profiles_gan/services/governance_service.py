@@ -1,4 +1,4 @@
-"""Serviço compartilhado de governança para Streamlit, FastAPI e React."""
+"""Serviço compartilhado de governança para FastAPI, React e relatórios."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def build_governance_api_snapshot(config: Any) -> dict[str, Any]:
         "operational": {
             "metrics": [
                 _metric("Estratégias disponíveis", "strategy_count", 3, "catálogo do projeto", "Programático, CTGAN e GAN simples existem como estratégias, independentemente de artefato neural."),
-                _metric("Modelo padrão geral", "default_model", snapshot.overview["default_model"], "configs/ui.yaml", "Modelo inicial da interface; não significa melhor desempenho universal."),
+                _metric("Modelo padrão geral", "default_model", snapshot.overview["default_model"], "configs/api.yaml", "Modelo inicial da interface; não significa melhor desempenho universal."),
                 _metric("Modelo neural recomendado", "recommended_neural_model", None if recommended is None else recommended["artifact_id"], "ModelRegistry", "Artefato neural aprovado internamente, quando disponível."),
                 _metric("Execuções registradas", "registered_executions", len(snapshot.history), "manifestos em artifacts/", "Quantidade de registros operacionais identificados localmente."),
                 _metric("Execuções com avaliação completa", "evaluated_executions", evaluated_count, "evaluation.json ou manifesto", "Quantidade de registros com avaliação agregada disponível."),
@@ -1092,7 +1092,7 @@ def _resolve_config(config: Any) -> GovernanceSourceConfig:
     return GovernanceSourceConfig(
         artifacts_root=Path(getattr(config, "artifacts_root")),
         models_root=Path(getattr(config, "models_root")),
-        audit_events_path=Path(getattr(config, "audit_events_path", Path("artifacts/ui_audit/events.jsonl"))),
+        audit_events_path=Path(getattr(config, "audit_events_path", Path("artifacts/web_audit/events.jsonl"))),
         default_model=str(getattr(config, "default_model", "programmatic")),
         approved_model_artifacts=getattr(config, "approved_model_artifacts", None),
     )

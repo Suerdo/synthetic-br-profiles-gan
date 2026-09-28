@@ -39,7 +39,6 @@ def load_history(artifacts_root: str | Path, limit: int | None = None) -> list[H
     records.extend(_load_run_records(root / "runs"))
     records.extend(_load_benchmark_records(root / "benchmarks"))
     records.extend(_load_model_records(root / "models"))
-    records.extend(_load_generation_records(root / "ui_sessions"))
     records.extend(_load_generation_records(root / "web_sessions"))
     records.sort(key=lambda item: item.created_at_utc or "", reverse=True)
     if limit is not None:
@@ -92,7 +91,7 @@ def history_summary(records: Iterable[HistoryRecord]) -> dict[str, Any]:
 
 
 def history_as_rows(records: Iterable[HistoryRecord]) -> list[dict[str, Any]]:
-    """Converte registros em linhas seguras para exibição tabular no Streamlit."""
+    """Converte registros em linhas seguras para exibição tabular."""
     rows: list[dict[str, Any]] = []
     for record in records:
         row = public_history_row(record)

@@ -157,7 +157,7 @@ const governance = {
   operational: {
     metrics: [
       { label: "Estratégias disponíveis", key: "strategy_count", value: 3, source: "ModelRegistry", help: "Estratégias do projeto." },
-      { label: "Modelo padrão geral", key: "default_model", value: "programmatic", source: "configs/ui.yaml", help: "Modelo inicial da interface." },
+      { label: "Modelo padrão geral", key: "default_model", value: "programmatic", source: "configs/api.yaml", help: "Modelo inicial da interface." },
       { label: "Modelo neural recomendado", key: "recommended_neural_model", value: "ctgan/approved", source: "ModelRegistry", help: "Artefato neural recomendado." },
       { label: "Execuções registradas", key: "registered_executions", value: 3, source: "manifestos", help: "Execuções locais." },
       { label: "Execuções com avaliação completa", key: "evaluated_executions", value: 2, source: "evaluation.json", help: "Execuções avaliadas." }

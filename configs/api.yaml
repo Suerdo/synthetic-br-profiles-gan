@@ -3,7 +3,7 @@ application:
   subtitle: "Geração, avaliação e governança de perfis sintéticos brasileiros para desenvolvimento, testes, pesquisa e Inteligência Artificial responsável."
   preview_rows: 20
   models_root: "artifacts/models"
-  sessions_root: "artifacts/ui_sessions"
+  web_sessions_root: "artifacts/web_sessions"
   artifacts_root: "artifacts"
 
 generation:
@@ -26,7 +26,4 @@ model_artifacts:
     simple_gan: []
 
 audit:
-  events_path: "artifacts/ui_audit/events.jsonl"
-
-compliance:
-  legal_content_last_review: "2026-07-28"
+  events_path: "artifacts/web_audit/events.jsonl"
